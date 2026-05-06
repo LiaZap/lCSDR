@@ -36,8 +36,12 @@ export default function Conversations() {
       const order = { qualificado: 0, handoff: 1, qualificando: 2, pre_qualificando: 3, novo: 4, agendado: 5, desqualificado: 6 };
       const rows = (r.contacts || []).sort((a, b) => (order[a.stage] ?? 9) - (order[b.stage] ?? 9));
       setContacts(rows);
-      // Se não tem ativo, pega o primeiro
-      if (!active && rows.length > 0) setActive(rows[0].id);
+      // Forma funcional: só define o primeiro como ativo SE não tiver nenhum.
+      // Senão (já tem ativo, mesmo que mudou pelo clique do usuário), preserva.
+      // Importante: usar callback evita stale closure no setInterval.
+      if (rows.length > 0) {
+        setActive(prev => prev ?? rows[0].id);
+      }
     } finally { setLoading(false); }
   }
 
@@ -49,7 +53,16 @@ export default function Conversations() {
     } catch (e) { console.error(e); }
   }
 
-  useEffect(() => { loadList(); const t = setInterval(loadList, 15000); return () => clearInterval(t); }, []);
+  // Carrega lista inicial e refaz a cada 15s.
+  // IMPORTANTE: deps vazias propositalmente — o polling é independente do clique.
+  // O fix do "volta pra primeira" foi feito em loadList usando setActive(prev => prev ?? ...).
+  useEffect(() => {
+    loadList();
+    const t = setInterval(loadList, 15000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => { loadDetail(active); }, [active]);
   useEffect(() => { messagesRef.current?.scrollTo(0, 9e9); }, [data?.messages?.length]);
 
