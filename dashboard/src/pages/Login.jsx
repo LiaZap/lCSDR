@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, setSession } from '../lib/api.js';
 import LCLogo from '../components/LCLogo.jsx';
+import { Icon } from '../components/Icon.jsx';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -45,21 +46,36 @@ export default function Login() {
 
           <ul className="login-features">
             <li>
-              <div className="feat-ico">⚡</div>
+              <div className="feat-ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 4.5h18l-7.2 9v6l-3.6 1.8v-7.8L3 4.5z" />
+                </svg>
+              </div>
               <div>
                 <strong>Filtra antes de chegar</strong>
-                <span>Lead lixo cortado antes do SDR olhar</span>
+                <span>Lead sem perfil cortado antes do SDR olhar</span>
               </div>
             </li>
             <li>
-              <div className="feat-ico">📚</div>
+              <div className="feat-ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                  <line x1="9" y1="7" x2="15" y2="7" />
+                  <line x1="9" y1="11" x2="13" y2="11" />
+                </svg>
+              </div>
               <div>
                 <strong>Treinada na LC</strong>
                 <span>16 anos de mercado literário no DNA</span>
               </div>
             </li>
             <li>
-              <div className="feat-ico">🤝</div>
+              <div className="feat-ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                </svg>
+              </div>
               <div>
                 <strong>Humano sempre fecha</strong>
                 <span>Lila passa pro Closer no momento certo</span>
@@ -125,7 +141,7 @@ export default function Login() {
 
           {err && (
             <div className="login-error">
-              <span>⚠</span> {err}
+              <Icon.X width={14} height={14} /> {err}
             </div>
           )}
 
@@ -133,7 +149,7 @@ export default function Login() {
             {loading ? (
               <><span className="spinner" /> Entrando…</>
             ) : (
-              <>Entrar no painel <span className="arrow">→</span></>
+              <>Entrar no painel <Icon.ArrowRight className="arrow" width={16} height={16} /></>
             )}
           </button>
 

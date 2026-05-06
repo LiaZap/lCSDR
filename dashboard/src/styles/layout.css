@@ -78,10 +78,12 @@
 }
 
 .sidebar nav a .nav-ico {
-  font-size: 16px;
   width: 18px;
-  text-align: center;
+  height: 18px;
+  flex-shrink: 0;
+  opacity: 0.85;
 }
+.sidebar nav a.active .nav-ico { opacity: 1; }
 
 /* Theme toggle no canto da sidebar */
 .theme-toggle {

@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom'
 import { getUser, clearSession } from './lib/api.js';
 import { getTheme, toggleTheme } from './lib/theme.js';
 import LCLogo from './components/LCLogo.jsx';
+import { Icon } from './components/Icon.jsx';
 import Login from './pages/Login.jsx';
 import Overview from './pages/Overview.jsx';
 import Conversations from './pages/Conversations.jsx';
@@ -29,16 +30,16 @@ function Shell({ children }) {
 
         <nav>
           <NavLink to="/" end>
-            <span className="nav-ico">◐</span> Visão geral
+            <Icon.Overview className="nav-ico" /> Visão geral
           </NavLink>
           <NavLink to="/conversas">
-            <span className="nav-ico">✉</span> Conversas
+            <Icon.Inbox className="nav-ico" /> Conversas
           </NavLink>
           <NavLink to="/leads">
-            <span className="nav-ico">⊞</span> Leads
+            <Icon.Kanban className="nav-ico" /> Leads
           </NavLink>
           <NavLink to="/playground">
-            <span className="nav-ico">▶</span> Playground
+            <Icon.Play className="nav-ico" /> Playground
           </NavLink>
         </nav>
 
@@ -48,7 +49,7 @@ function Shell({ children }) {
             onClick={() => setTheme(toggleTheme())}
             title="Alternar tema"
           >
-            <span className="ico">{theme === 'dark' ? '☀' : '◑'}</span>
+            {theme === 'dark' ? <Icon.Sun width={14} height={14} /> : <Icon.Moon width={14} height={14} />}
             {theme === 'dark' ? 'Claro' : 'Escuro'}
           </button>
 
@@ -56,9 +57,9 @@ function Shell({ children }) {
             <div className="user-avatar">{initials}</div>
             <div style={{ fontWeight: 600, color: 'var(--lc-white)' }}>{user.name}</div>
             <div className="small muted" style={{ marginBottom: 8 }}>{user.email}</div>
-            <button className="ghost small" style={{ padding: '4px 8px', color: 'rgba(255,255,255,0.6)', alignSelf: 'flex-start' }}
+            <button className="ghost small" style={{ padding: '4px 8px', color: 'rgba(255,255,255,0.6)', alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6 }}
               onClick={() => { clearSession(); nav('/login'); }}>
-              Sair
+              <Icon.Logout width={12} height={12} /> Sair
             </button>
           </div>
         </div>
