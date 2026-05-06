@@ -17,7 +17,12 @@
       "Bash(git remote *)",
       "Bash(git check-ignore *)",
       "Bash(find . -name \".env\" -not -path \"*/node_modules/*\")",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(grep -E \"sk-\\(ant|proj\\)-[a-zA-Z0-9_-]{20,}\" agente/.env.example .env.production.example)",
+      "Bash(git -c core.autocrlf=true commit -m ' *)",
+      "Bash(git config *)",
+      "Bash(git push *)",
+      "Bash(git commit -m 'fix\\(nginx\\): upstream backend dinâmico via env BACKEND_HOST/BACKEND_PORT *)"
     ]
   }
 }

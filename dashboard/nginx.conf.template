@@ -1,8 +1,6 @@
-# Nginx do dashboard: serve build estática + proxy /api e /auth pro backend
-#
-# No EasyPanel, ambos serviços (dashboard e agente) ficam na mesma rede do projeto.
-# O backend é alcançável pelo nome do serviço: http://agente:3333
-# Em outros provedores, ajuste BACKEND_URL via env var no entrypoint se preciso.
+# Template do nginx — usa envsubst pra injetar BACKEND_HOST e BACKEND_PORT no boot.
+# Permite que o nome do serviço backend seja diferente em cada deploy
+# (no docker-compose local: "agente"; no EasyPanel: "lcsdr"; etc).
 
 server {
     listen 80;
@@ -28,9 +26,14 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
+    # Resolver dinâmico (Docker DNS) — sem isso o nginx faz cache do IP
+    # do backend no startup e quebra se o container reiniciar.
+    resolver 127.0.0.11 valid=30s ipv6=off;
+    set $backend_upstream "${BACKEND_HOST}:${BACKEND_PORT}";
+
     # === API: proxy pro backend ===
     location /api/ {
-        proxy_pass http://agente:3333;
+        proxy_pass http://$backend_upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -40,7 +43,7 @@ server {
     }
 
     location /auth/ {
-        proxy_pass http://agente:3333;
+        proxy_pass http://$backend_upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -50,7 +53,7 @@ server {
 
     # === Webhook uazapi/GHL (mesmo subdomínio) ===
     location /webhook/ {
-        proxy_pass http://agente:3333;
+        proxy_pass http://$backend_upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -60,6 +63,6 @@ server {
 
     # Healthcheck do backend exposto pra debug
     location = /health {
-        proxy_pass http://agente:3333/health;
+        proxy_pass http://$backend_upstream/health;
     }
 }

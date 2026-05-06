@@ -36,6 +36,11 @@ services:
       dockerfile: Dockerfile.prod
     image: lcsdr-dashboard
     restart: unless-stopped
+    environment:
+      # Em ambiente local com docker-compose, o serviço se chama "agente"
+      # No EasyPanel, troque pra "lcsdr" (ou nome do seu serviço backend) via env var no painel
+      - BACKEND_HOST=agente
+      - BACKEND_PORT=3333
     # Esse é o serviço que ganha o domínio público no EasyPanel
     ports:
       - "80:80"

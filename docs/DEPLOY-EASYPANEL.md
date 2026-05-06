@@ -66,7 +66,7 @@ Não deve aparecer nenhum `.env` (só `.env.example` e `.env.production.example`
    - **Dockerfile path**: `Dockerfile` (relativo ao build path)
    - **Public**: **NÃO** marcar (privado, só rede interna)
    - **Port**: `3333`
-3. Add Service → **App** → `dashboard`
+3. Add Service → **App** → `dashboard` (ou `lcdash` — o nome que você escolher)
    - **Source**: mesmo repo, mesma branch
    - **Build path**: `/dashboard`
    - **Build method**: Dockerfile
@@ -74,6 +74,13 @@ Não deve aparecer nenhum `.env` (só `.env.example` e `.env.production.example`
    - **Public**: ✅ marcar
    - **Port**: `80`
    - **Domain**: deixe o EasyPanel atribuir o subdomínio temporário
+   - **⚠ Environment Variables** do dashboard:
+     ```
+     BACKEND_HOST=<NOME_DO_SERVICO_BACKEND_NO_EASYPANEL>
+     BACKEND_PORT=3333
+     ```
+     Esse `BACKEND_HOST` é literalmente o nome do app `agente` que você criou no passo 2 (ex: `lcsdr`, `agente`, `lc-agente` — o que você escolheu).
+     Sem isso, o nginx do dashboard não acha o backend e dá `502 Bad Gateway` ou `host not found in upstream`.
 
 ---
 
