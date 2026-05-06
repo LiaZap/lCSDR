@@ -138,6 +138,92 @@ function extractPhone(event) {
   return null;
 }
 
+// === Classificador de tipo de mensagem ===
+// uazapi/Baileys mandam o tipo em msg.messageType com vários valores possíveis.
+// Mapeamos cada um pra uma categoria interna + extrai conteúdo + URL de mídia.
+//
+// Tipos suportados (case-insensitive):
+//   Conversation             → texto puro
+//   ExtendedTextMessage      → texto com formatação (link/reply)
+//   EphemeralMessage         → wrapper de mensagem efêmera (desempacota)
+//   AudioMessage             → áudio
+//   ImageMessage             → imagem (caption pode estar em .text)
+//   DocumentMessage          → arquivo PDF/doc
+//   VideoMessage             → vídeo (tratamos como image — só registra)
+//   StickerMessage           → sticker (ignora)
+//   LocationMessage          → localização (ignora)
+//   ContactMessage           → contato vCard (ignora)
+//   ButtonsResponseMessage / TemplateButtonReplyMessage → resposta de botão
+//   ListResponseMessage      → resposta de lista
+function classifyMessage(msg) {
+  const rawType = String(msg.messageType || msg.mediaType || '').toLowerCase();
+  const text = String(msg.text || msg.content || msg.caption || '').trim();
+  const buttonId = msg.buttonOrListid || msg.buttonReplyId || msg.listResponseId;
+
+  // Botão/lista clicado tem prioridade — vem como mensagem normal mas com buttonOrListid setado
+  if (buttonId) {
+    return {
+      category: 'button_reply',
+      text,
+      buttonId,
+      mediaUrl: null,
+    };
+  }
+
+  // Áudio
+  if (/audio/.test(rawType) || msg.audioUrl || msg.audio) {
+    return {
+      category: 'audio',
+      text,
+      mediaUrl: msg.audioUrl || msg.audio?.url || msg.mediaUrl || null,
+      mediaBase64: msg.audio?.base64 || msg.mediaBase64 || null,
+    };
+  }
+
+  // Documento (PDF, doc, xlsx etc)
+  if (/document/.test(rawType) || msg.documentUrl) {
+    return {
+      category: 'document',
+      text,
+      mediaUrl: msg.documentUrl || msg.mediaUrl || null,
+      filename: msg.fileName || msg.filename || null,
+    };
+  }
+
+  // Imagem (pode ter caption no text)
+  if (/image/.test(rawType) || msg.imageUrl) {
+    return {
+      category: 'image',
+      text,
+      mediaUrl: msg.imageUrl || msg.mediaUrl || null,
+    };
+  }
+
+  // Vídeo (tratamos como imagem — só registra)
+  if (/video/.test(rawType) || msg.videoUrl) {
+    return {
+      category: 'video',
+      text,
+      mediaUrl: msg.videoUrl || msg.mediaUrl || null,
+    };
+  }
+
+  // Sticker / Location / Contact — ignorar gentilmente
+  if (/sticker/.test(rawType)) return { category: 'sticker', text: '', mediaUrl: null };
+  if (/location/.test(rawType)) return { category: 'location', text: '', mediaUrl: null };
+  if (/contact/.test(rawType)) return { category: 'contact', text: '', mediaUrl: null };
+
+  // EphemeralMessage é wrapper — uazapi normalmente desempacota e popula .text/.content
+  // Se chegou texto, trata como texto normal
+  // Conversation, ExtendedTextMessage, EphemeralMessage, ou tipo desconhecido com texto → text
+  if (text || /conversation|extendedtext|ephemeral|message$/.test(rawType)) {
+    return { category: 'text', text, mediaUrl: null };
+  }
+
+  // Sem categoria reconhecida nem texto
+  return { category: 'unknown', text: '', mediaUrl: null, rawType };
+}
+
 function findOrCreateContactByPhone(phone, name) {
   const ghlId = `wa-${phone}`;
   let contact = db.prepare('SELECT * FROM contacts WHERE ghl_contact_id = ?').get(ghlId);
@@ -167,70 +253,102 @@ async function handleInbound(event) {
   const name = msg.senderName || chat.name || chat.wa_name || null;
   const contact = findOrCreateContactByPhone(phone, name);
 
-  // Texto da mensagem (defensivo: força string)
-  let content = String(msg.text || msg.content || '').trim();
+  // Classifica a mensagem (Conversation/ExtendedText/Audio/Image/Document/etc)
+  const m = classifyMessage(msg);
+  logger.info({ category: m.category, hasText: !!m.text, hasMedia: !!m.mediaUrl }, '[uazapi] mensagem classificada');
+
+  let content = m.text;
   let content_type = 'text';
-  let attachment_url = null;
+  let attachment_url = m.mediaUrl;
 
-  // Tipo da mídia (uazapi usa mediaType ou messageType)
-  const mediaType = (msg.mediaType || '').toLowerCase();
-  const messageType = (msg.messageType || '').toLowerCase();
+  // === Tratamento por categoria ===
+  switch (m.category) {
+    case 'text': {
+      // Conversation, ExtendedTextMessage, EphemeralMessage com texto puro
+      // content já é m.text
+      break;
+    }
 
-  // Botão / lista clicado
-  // uazapi: msg.buttonOrListid traz o id que a Lila definiu como `value`
-  const buttonId = msg.buttonOrListid || msg.buttonReplyId || msg.listResponseId;
-  if (buttonId) {
-    const label = String(msg.text || msg.content || buttonId);
-    content = `[lead clicou: ${label}] (valor=${buttonId})`;
-    content_type = 'button_click';
-  }
+    case 'button_reply': {
+      // Lead clicou num botão/lista da Lila
+      const label = m.text || m.buttonId;
+      content = `[lead clicou: ${label}] (valor=${m.buttonId})`;
+      content_type = 'button_click';
+      break;
+    }
 
-  // Áudio
-  if (mediaType === 'audio' || messageType === 'audio' || msg.audio || msg.audioUrl) {
-    const url = msg.audioUrl || msg.audio?.url || msg.mediaUrl;
-    attachment_url = url;
-    try {
-      let buf;
-      const audioData = msg.audio?.base64 || msg.mediaBase64;
-      if (audioData) {
-        buf = Buffer.from(audioData, 'base64');
-      } else if (url) {
-        const r = await fetch(url);
-        buf = Buffer.from(await r.arrayBuffer());
+    case 'audio': {
+      // AudioMessage → transcreve via Whisper
+      try {
+        let buf;
+        if (m.mediaBase64) {
+          buf = Buffer.from(m.mediaBase64, 'base64');
+        } else if (m.mediaUrl) {
+          const r = await fetch(m.mediaUrl);
+          buf = Buffer.from(await r.arrayBuffer());
+        }
+        const transcript = buf ? await transcribeAudioBuffer(buf) : null;
+        content = transcript || '[áudio recebido — falha na transcrição]';
+        content_type = 'audio_transcript';
+      } catch (err) {
+        logger.error({ err: err.message }, 'falha transcrevendo áudio');
+        content = '[áudio recebido — não consegui ouvir]';
+        content_type = 'audio_transcript';
       }
-      const transcript = buf ? await transcribeAudioBuffer(buf) : null;
-      content = transcript || '[áudio recebido — falha na transcrição]';
-      content_type = 'audio_transcript';
-    } catch (err) {
-      logger.error({ err: err.message }, 'falha baixando/transcrevendo áudio uazapi');
-      content = '[áudio recebido — não consegui ouvir]';
-      content_type = 'audio_transcript';
+      break;
+    }
+
+    case 'document': {
+      // DocumentMessage (PDF, doc) → bloqueia, delega pra leitura crítica
+      recordInbound(contact.id, {
+        content: `[lead enviou arquivo${m.filename ? `: ${m.filename}` : ''}]`,
+        content_type: 'pdf_blocked',
+        attachment_url: m.mediaUrl,
+      });
+      const txt = 'Opa, análise de arquivo a gente faz na etapa de leitura crítica com a equipe. Me conta em texto: o livro já está finalizado?';
+      await sendText(contact, txt).catch(err => logger.error({ err: err.message }, 'send fail'));
+      recordOutbound(contact.id, { author: 'ia', content: txt });
+      return;
+    }
+
+    case 'image': {
+      // ImageMessage → registra (caption se houver), não analisa imagem
+      content = m.text || '[lead enviou uma imagem]';
+      content_type = 'image';
+      break;
+    }
+
+    case 'video': {
+      // VideoMessage → registra mas não analisa
+      content = m.text || '[lead enviou um vídeo]';
+      content_type = 'video';
+      break;
+    }
+
+    case 'sticker':
+    case 'location':
+    case 'contact': {
+      // Tipos não-comerciais — registra e responde gentilmente
+      const labels = { sticker: 'figurinha', location: 'localização', contact: 'contato' };
+      recordInbound(contact.id, {
+        content: `[lead enviou ${labels[m.category]}]`,
+        content_type: m.category,
+      });
+      // Não responde automaticamente — espera próxima mensagem do lead
+      logger.info({ category: m.category, contactId: contact.id }, 'tipo não-comercial recebido, sem resposta automática');
+      return;
+    }
+
+    case 'unknown':
+    default: {
+      logger.warn({ rawType: m.rawType, msg }, 'tipo de mensagem não reconhecido');
+      return;
     }
   }
 
-  // Documento / PDF — bloqueia, não tenta analisar
-  if (mediaType === 'document' || messageType === 'document' || msg.documentUrl) {
-    const url = msg.documentUrl || msg.mediaUrl;
-    recordInbound(contact.id, {
-      content: `[lead enviou arquivo: ${url || '?'}]`,
-      content_type: 'pdf_blocked',
-      attachment_url: url,
-    });
-    const txt = 'Opa, análise de arquivo a gente faz na etapa de leitura crítica com a equipe. Me conta em texto: o livro já está finalizado?';
-    await sendText(contact, txt).catch(err => logger.error({ err: err.message }, 'send fail'));
-    recordOutbound(contact.id, { author: 'ia', content: txt });
-    return;
-  }
-
-  // Imagem — registra mas não tenta analisar
-  if (mediaType === 'image' || messageType === 'image') {
-    attachment_url = msg.imageUrl || msg.mediaUrl;
-    content = content || '[lead enviou uma imagem]';
-    content_type = 'image';
-  }
-
+  // Após o switch: precisa ter conteúdo pra processar
   if (!content || !content.trim()) {
-    logger.warn({ phone, mediaType, messageType }, 'mensagem vazia, ignorando');
+    logger.warn({ phone, category: m.category }, 'mensagem sem conteúdo processável, ignorando');
     return;
   }
 
