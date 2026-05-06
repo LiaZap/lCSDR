@@ -29,8 +29,10 @@ export default function Overview() {
     api.metrics(days).then(setData).catch(console.error);
   }, [days]);
 
-  if (!data) return <SkeletonOverview />;
-  const { totais = {}, porFunil = [], porDia = [] } = data;
+  // Defaults defensivos (importante: hooks devem ser chamados ANTES de qualquer return)
+  const totais = data?.totais || {};
+  const porFunil = data?.porFunil || [];
+  const porDia = data?.porDia || [];
 
   const totalLeads = totais.leads || 0;
   const qualificados = totais.qualificados || 0;
@@ -39,8 +41,13 @@ export default function Overview() {
   const taxaQualificacao = totalLeads ? Math.round((qualificados / totalLeads) * 100) : 0;
   const taxaFiltro = totalLeads ? Math.round((desqualificados / totalLeads) * 100) : 0;
 
-  // Insights automáticos baseados nos dados
-  const insights = useMemo(() => generateInsights({ porDia, porFunil, taxaQualificacao, totalLeads }), [porDia, porFunil, taxaQualificacao, totalLeads]);
+  // Insights automáticos baseados nos dados — useMemo PRECISA vir antes do early return
+  const insights = useMemo(
+    () => generateInsights({ porDia, porFunil, taxaQualificacao, totalLeads }),
+    [porDia, porFunil, taxaQualificacao, totalLeads]
+  );
+
+  if (!data) return <SkeletonOverview />;
 
   // Funil de conversão (todos → qualificados → handoff → agendado)
   const funilConversao = [
