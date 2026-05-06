@@ -1,61 +1,82 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, getUser } from '../lib/api.js';
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar,
+  CartesianGrid, Area, AreaChart,
 } from 'recharts';
 
 const FUNNEL_COLORS = {
-  escrever: '#E6227A',   // magenta principal
-  publicar: '#111111',   // preto
-  divulgar: '#A01854',   // berry
-  indefinido: '#9A9A9A', // cinza
+  escrever: '#E6227A',
+  publicar: '#111111',
+  divulgar: '#A01854',
+  indefinido: '#9A9A9A',
+};
+
+const FUNNEL_LABELS = {
+  escrever: 'Escrever',
+  publicar: 'Publicar',
+  divulgar: 'Divulgar',
+  indefinido: 'Indefinido',
 };
 
 export default function Overview() {
   const [days, setDays] = useState(7);
   const [data, setData] = useState(null);
+  const user = getUser();
+  const seenWelcome = typeof window !== 'undefined' && localStorage.getItem('lc_welcome_seen') === '1';
 
   useEffect(() => {
     api.metrics(days).then(setData).catch(console.error);
   }, [days]);
 
-  const user = getUser();
-  const seenWelcome = typeof window !== 'undefined' && localStorage.getItem('lc_welcome_seen') === '1';
-
-  if (!data) return <div className="muted">Carregando métricas…</div>;
+  if (!data) return <SkeletonOverview />;
   const { totais = {}, porFunil = [], porDia = [] } = data;
 
   const totalLeads = totais.leads || 0;
   const qualificados = totais.qualificados || 0;
+  const desqualificados = totais.desqualificados || 0;
+  const emAtendimento = totais.em_atendimento || 0;
   const taxaQualificacao = totalLeads ? Math.round((qualificados / totalLeads) * 100) : 0;
+  const taxaFiltro = totalLeads ? Math.round((desqualificados / totalLeads) * 100) : 0;
+
+  // Insights automáticos baseados nos dados
+  const insights = useMemo(() => generateInsights({ porDia, porFunil, taxaQualificacao, totalLeads }), [porDia, porFunil, taxaQualificacao, totalLeads]);
+
+  // Funil de conversão (todos → qualificados → handoff → agendado)
+  const funilConversao = [
+    { stage: 'Total', value: totalLeads, color: '#9A9A9A' },
+    { stage: 'Em atendimento', value: emAtendimento, color: '#E6227A' },
+    { stage: 'Qualificados', value: qualificados, color: '#A01854' },
+    { stage: 'Handoff', value: totais.em_handoff || 0, color: '#111111' },
+  ];
 
   return (
     <div className="col" style={{ gap: 24 }}>
       {!seenWelcome && (
-        <div className="card" style={{ borderLeft: '4px solid var(--lc-magenta)', position: 'relative' }}>
+        <div className="card glow" style={{ borderLeft: '4px solid var(--lc-magenta)', position: 'relative' }}>
           <button
             className="ghost small"
             onClick={() => { localStorage.setItem('lc_welcome_seen', '1'); window.location.reload(); }}
-            style={{ position: 'absolute', top: 8, right: 12, padding: '2px 8px', fontSize: 18, color: 'var(--lc-stone)' }}
+            style={{ position: 'absolute', top: 12, right: 14, padding: '2px 8px', fontSize: 18, color: 'var(--text-tertiary)' }}
             title="Fechar"
           >×</button>
           <h2 style={{ marginBottom: 8 }}>👋 Bem-vinda{user?.name ? `, ${user.name.split(' ')[0]}` : ''}!</h2>
-          <p style={{ marginBottom: 12, lineHeight: 1.6 }}>
-            Esse é o painel da <strong>Lila</strong>, IA SDR do Grupo LC. Veja o que dá pra fazer aqui:
+          <p style={{ marginBottom: 12, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+            Esse é o painel da <strong>Lila</strong>, IA SDR do Grupo LC.
           </p>
-          <ol style={{ paddingLeft: 20, lineHeight: 1.8, fontSize: 14 }}>
-            <li>
-              <strong>Playground</strong> — converse com a Lila como se fosse um lead. Use pra testar o tom, tirar dúvidas, ver os botões interativos. Sem custo de WhatsApp real.
-            </li>
-            <li>
-              <strong>Conversas / Leads</strong> — leia o que a Lila falou com leads. Em cada conversa, dá pra avaliar 👍 / 👎 e deixar comentário. <em>Esse feedback alimenta o refinamento contínuo do prompt</em> — quanto mais você marcar, melhor a Lila fica.
-            </li>
-            <li>
-              <strong>Visão geral</strong> — métricas em tempo real: leads/dia, funil, taxa de qualificação.
-            </li>
-          </ol>
-          <div className="small muted" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--lc-line)' }}>
-            ⚠ Os dados aqui são demo (gerados pela própria IA). WhatsApp real ainda não está conectado.
+          <div className="grid-3" style={{ marginTop: 16 }}>
+            <div>
+              <strong style={{ display: 'block', color: 'var(--lc-magenta)', marginBottom: 4 }}>▶ Playground</strong>
+              <span className="small" style={{ color: 'var(--text-secondary)' }}>Converse com a Lila como se fosse um lead. Teste tom e fluxo sem custo de WhatsApp.</span>
+            </div>
+            <div>
+              <strong style={{ display: 'block', color: 'var(--lc-magenta)', marginBottom: 4 }}>⊞ Leads (Kanban)</strong>
+              <span className="small" style={{ color: 'var(--text-secondary)' }}>Pipeline visual estilo Trello. Arraste leads entre os estágios.</span>
+            </div>
+            <div>
+              <strong style={{ display: 'block', color: 'var(--lc-magenta)', marginBottom: 4 }}>✉ Conversas</strong>
+              <span className="small" style={{ color: 'var(--text-secondary)' }}>Inbox. Avalie tom da Lila com 👍/👎 — alimenta refinamento contínuo.</span>
+            </div>
           </div>
         </div>
       )}
@@ -63,7 +84,7 @@ export default function Overview() {
       <div className="page-header">
         <div>
           <h1>Visão geral</h1>
-          <div className="muted small">Últimos {days} dias</div>
+          <div className="muted small">Últimos {days} dias · atualizado agora</div>
         </div>
         <div className="row">
           {[7, 15, 30].map(d => (
@@ -74,73 +95,141 @@ export default function Overview() {
         </div>
       </div>
 
+      {/* === Insights automáticos === */}
+      {insights.length > 0 && (
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {insights.map((ins, i) => (
+            <div key={i} className="card" style={{
+              padding: '14px 18px',
+              flex: '1 1 240px',
+              borderLeft: `3px solid ${ins.color}`,
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <div style={{ fontSize: 22 }}>{ins.icon}</div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{ins.title}</div>
+                <div className="small muted">{ins.detail}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* === KPIs com sparklines === */}
       <div className="grid-4">
-        <Kpi label="Leads no período" value={totais.leads || 0} />
-        <Kpi label="Qualificados" value={totais.qualificados || 0} hint="prontos pro SDR" />
-        <Kpi label="Em atendimento IA" value={totais.em_atendimento || 0} />
-        <Kpi label="Desqualificados" value={totais.desqualificados || 0} hint="IA filtrou" />
+        <KpiCard
+          label="Leads no período"
+          value={totalLeads}
+          spark={porDia.map(d => ({ v: d.total }))}
+          sparkColor="var(--lc-magenta)"
+          gradient
+        />
+        <KpiCard
+          label="Qualificados"
+          value={qualificados}
+          hint={`${taxaQualificacao}% de conversão`}
+          spark={porDia.map(d => ({ v: d.qualificados || 0 }))}
+          sparkColor="var(--lc-success)"
+          delta={taxaQualificacao >= 20 ? { dir: 'up', value: `${taxaQualificacao}%` } : null}
+        />
+        <KpiCard
+          label="Em atendimento"
+          value={emAtendimento}
+          hint="Lila conversando"
+          spark={porDia.map(d => ({ v: Math.max(0, (d.total || 0) - (d.qualificados || 0)) }))}
+          sparkColor="var(--lc-magenta-600)"
+        />
+        <KpiCard
+          label="Filtrados"
+          value={desqualificados}
+          hint={`${taxaFiltro}% lixo cortado`}
+          spark={porDia.map(d => ({ v: 0 }))}
+          sparkColor="var(--lc-stone)"
+          delta={taxaFiltro >= 20 ? { dir: 'flat', value: `${taxaFiltro}% lixo` } : null}
+        />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16 }}>
-        <div className="card">
-          <h3>Leads por dia</h3>
+      {/* === Layout 2 colunas: chart principal + funil + por funil === */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16 }}>
+        <div className="card elevated">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+            <h3>Volume de leads por dia</h3>
+            <span className="small muted">Total vs Qualificados</span>
+          </div>
           <div style={{ height: 260, marginTop: 12 }}>
             <ResponsiveContainer>
-              <LineChart data={porDia}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#EDE7DF" />
-                <XAxis dataKey="dia" fontSize={11} stroke="#6F6F6F" />
-                <YAxis fontSize={11} stroke="#6F6F6F" />
-                <Tooltip />
-                <Line type="monotone" dataKey="total" stroke="#111111" strokeWidth={2} dot={false} name="Total" />
-                <Line type="monotone" dataKey="qualificados" stroke="#E6227A" strokeWidth={2} dot={false} name="Qualificados" />
-              </LineChart>
+              <AreaChart data={porDia}>
+                <defs>
+                  <linearGradient id="gradTotal" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#111111" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#111111" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradQual" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#E6227A" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="#E6227A" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-soft)" />
+                <XAxis dataKey="dia" fontSize={11} stroke="var(--text-tertiary)" />
+                <YAxis fontSize={11} stroke="var(--text-tertiary)" />
+                <Tooltip contentStyle={{ background: 'var(--surface-card)', border: '1px solid var(--border-soft)', borderRadius: 10 }} />
+                <Area type="monotone" dataKey="total" stroke="#111111" strokeWidth={2} fill="url(#gradTotal)" name="Total" />
+                <Area type="monotone" dataKey="qualificados" stroke="#E6227A" strokeWidth={2} fill="url(#gradQual)" name="Qualificados" />
+              </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="col">
+        <div className="col" style={{ gap: 16 }}>
+          {/* Funil de conversão */}
           <div className="card">
-            <h3>Taxa de qualificação</h3>
-            <div style={{ marginTop: 10 }}>
-              <div style={{
-                fontFamily: 'var(--font-serif)',
-                fontSize: 44,
-                color: 'var(--lc-magenta-600)',
-                lineHeight: 1,
-              }}>
-                {taxaQualificacao}%
-              </div>
-              <div className="small muted" style={{ marginTop: 6 }}>
-                {qualificados} de {totalLeads} leads qualificados pela Lila
-              </div>
-              <div style={{ marginTop: 12, background: 'var(--lc-line)', borderRadius: 99, height: 8 }}>
-                <div style={{
-                  width: `${taxaQualificacao}%`,
-                  background: 'var(--lc-magenta)',
-                  height: '100%',
-                  borderRadius: 99,
-                  transition: 'width .4s',
-                }} />
-              </div>
+            <h3>Funil de conversão</h3>
+            <div style={{ marginTop: 14 }}>
+              {funilConversao.map((s, i) => {
+                const pct = totalLeads ? Math.round((s.value / totalLeads) * 100) : 0;
+                const widthPct = i === 0 ? 100 : pct;
+                return (
+                  <div key={s.stage} style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>{s.stage}</span>
+                      <span style={{ color: 'var(--text-tertiary)' }}>{s.value} · {pct}%</span>
+                    </div>
+                    <div style={{ background: 'var(--border-soft)', borderRadius: 6, height: 8, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${widthPct}%`,
+                        background: s.color,
+                        height: '100%',
+                        borderRadius: 6,
+                        transition: 'width 0.6s var(--ease-out)',
+                      }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
+          {/* Por funil */}
           <div className="card">
-            <h3>Por funil</h3>
-            <div style={{ height: 180, marginTop: 10 }}>
-              <ResponsiveContainer>
-                <BarChart data={porFunil}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#EDE7DF" />
-                  <XAxis dataKey="funnel" fontSize={11} stroke="#6F6F6F" />
-                  <YAxis fontSize={11} stroke="#6F6F6F" />
-                  <Tooltip />
-                  <Bar dataKey="total" name="Leads">
-                    {porFunil.map((f, i) => (
-                      <rect key={i} fill={FUNNEL_COLORS[f.funnel] || '#9A9A9A'} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+            <h3>Distribuição por funil</h3>
+            <div style={{ marginTop: 12 }}>
+              {porFunil.map(f => {
+                const pct = totalLeads ? Math.round((f.total / totalLeads) * 100) : 0;
+                const color = FUNNEL_COLORS[f.funnel] || '#9A9A9A';
+                return (
+                  <div key={f.funnel} style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: 'var(--text-secondary)', textTransform: 'capitalize' }}>
+                        {FUNNEL_LABELS[f.funnel] || f.funnel}
+                      </span>
+                      <span style={{ color: 'var(--text-tertiary)' }}>{f.total}</span>
+                    </div>
+                    <div style={{ background: 'var(--border-soft)', borderRadius: 6, height: 6, overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, background: color, height: '100%', transition: 'width 0.6s' }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -149,12 +238,98 @@ export default function Overview() {
   );
 }
 
-function Kpi({ label, value, hint }) {
+function KpiCard({ label, value, hint, spark, sparkColor, delta, gradient }) {
   return (
-    <div className="kpi">
+    <div className={`kpi ${gradient ? 'gradient' : ''}`}>
       <div className="label">{label}</div>
       <div className="value">{value}</div>
       {hint && <div className="hint">{hint}</div>}
+      {delta && (
+        <div className={`delta ${delta.dir}`}>
+          {delta.dir === 'up' && '↗'}
+          {delta.dir === 'down' && '↘'}
+          {delta.dir === 'flat' && '→'}
+          {delta.value}
+        </div>
+      )}
+      {spark && spark.length > 1 && (
+        <div className="spark">
+          <ResponsiveContainer>
+            <LineChart data={spark}>
+              <Line type="monotone" dataKey="v" stroke={sparkColor} strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function generateInsights({ porDia, porFunil, taxaQualificacao, totalLeads }) {
+  if (totalLeads === 0) return [];
+  const ins = [];
+
+  // Insight 1: tendência (último dia vs penúltimo)
+  if (porDia.length >= 2) {
+    const last = porDia[porDia.length - 1];
+    const prev = porDia[porDia.length - 2];
+    const diff = (last.total || 0) - (prev.total || 0);
+    if (diff > 0) {
+      ins.push({
+        icon: '📈',
+        title: `+${diff} leads vs dia anterior`,
+        detail: `Hoje: ${last.total}, ontem: ${prev.total}`,
+        color: 'var(--lc-success)',
+      });
+    } else if (diff < 0 && Math.abs(diff) > 2) {
+      ins.push({
+        icon: '📉',
+        title: `${diff} leads vs dia anterior`,
+        detail: `Tráfego em queda — checar criativos`,
+        color: 'var(--lc-warn)',
+      });
+    }
+  }
+
+  // Insight 2: taxa de qualificação
+  if (taxaQualificacao >= 25) {
+    ins.push({
+      icon: '🎯',
+      title: `${taxaQualificacao}% de conversão`,
+      detail: 'Acima da média — Lila qualificando bem',
+      color: 'var(--lc-success)',
+    });
+  } else if (taxaQualificacao < 15 && totalLeads >= 10) {
+    ins.push({
+      icon: '⚠',
+      title: `${taxaQualificacao}% qualificação baixa`,
+      detail: 'Refinar prompt ou revisar criativos de tráfego',
+      color: 'var(--lc-warn)',
+    });
+  }
+
+  // Insight 3: top funil
+  const topFunil = [...porFunil].sort((a, b) => b.total - a.total)[0];
+  if (topFunil && topFunil.funnel !== 'indefinido') {
+    ins.push({
+      icon: '🏆',
+      title: `Funil ${FUNNEL_LABELS[topFunil.funnel] || topFunil.funnel} liderando`,
+      detail: `${topFunil.total} leads (${Math.round(topFunil.total / totalLeads * 100)}% do total)`,
+      color: 'var(--lc-magenta)',
+    });
+  }
+
+  return ins.slice(0, 3);
+}
+
+function SkeletonOverview() {
+  return (
+    <div className="col" style={{ gap: 24 }}>
+      <div className="skeleton" style={{ height: 80, borderRadius: 14 }} />
+      <div className="grid-4">
+        {[1, 2, 3, 4].map(i => <div key={i} className="skeleton" style={{ height: 130, borderRadius: 14 }} />)}
+      </div>
+      <div className="skeleton" style={{ height: 320, borderRadius: 14 }} />
     </div>
   );
 }

@@ -1,0 +1,215 @@
+/* === Kanban de Leads === */
+.leads-kanban-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: calc(100vh - 64px);
+}
+
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(260px, 1fr));
+  gap: 14px;
+  flex: 1;
+  overflow-x: auto;
+  padding-bottom: 12px;
+  align-items: stretch;
+}
+
+.kanban-col {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  padding: 14px 12px 8px;
+  min-height: 0;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.kanban-col.drop-over {
+  border-color: var(--lc-magenta);
+  background: var(--lc-magenta-25);
+  box-shadow: var(--shadow-magenta);
+}
+
+.kanban-col-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.kanban-col-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.kanban-col-title .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.kanban-col-count {
+  background: var(--surface-bg);
+  color: var(--text-tertiary);
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.kanban-col-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+  padding: 0 2px;
+}
+
+.kanban-col-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 200px;
+  padding: 0 2px 8px;
+}
+
+.kanban-empty {
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  padding: 20px 8px;
+  border: 1.5px dashed var(--border-soft);
+  border-radius: 10px;
+}
+
+/* === Lead card === */
+.lead-card {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 12px;
+  cursor: grab;
+  transition: all var(--transition);
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lead-card:hover {
+  border-color: var(--lc-magenta);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.lead-card.dragging {
+  cursor: grabbing;
+  box-shadow: var(--shadow-magenta-lg);
+  transform: rotate(2deg) scale(1.02);
+  border-color: var(--lc-magenta);
+  background: var(--surface-card);
+}
+
+.lead-card.stagnant {
+  border-left: 3px solid var(--lc-warn);
+}
+
+.lead-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lead-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: white;
+  flex-shrink: 0;
+}
+
+.lead-card-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.lead-card-name .name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lead-card-name .phone {
+  font-size: 11px;
+}
+
+.lead-card-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.lead-card-tags .tag {
+  font-size: 10px;
+  padding: 2px 8px;
+}
+
+.lead-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface-bg);
+  border-radius: 99px;
+  padding: 2px 8px 2px 4px;
+  font-size: 10px;
+}
+
+.lead-score .score-bar {
+  display: inline-block;
+  height: 6px;
+  border-radius: 99px;
+  min-width: 4px;
+  max-width: 40px;
+}
+
+.lead-score .score-num {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 10px;
+}
+
+.lead-notes {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  background: var(--surface-bg);
+  border-radius: 6px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--border-strong);
+}
+
+.lead-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.lead-card-foot .tag.warn { font-size: 10px; padding: 1px 6px; }

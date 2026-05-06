@@ -52,6 +52,12 @@ export const api = {
   assume(id) {
     return request(`/api/contacts/${id}/assume`, { method: 'POST' });
   },
+  setStage(id, stage) {
+    return request(`/api/contacts/${id}/stage`, {
+      method: 'PUT',
+      body: JSON.stringify({ stage }),
+    });
+  },
   release(id) {
     return request(`/api/contacts/${id}/release`, { method: 'POST' });
   },

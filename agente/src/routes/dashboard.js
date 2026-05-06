@@ -152,6 +152,21 @@ router.get('/feedback/summary', (req, res) => {
   res.json({ counts, total });
 });
 
+// === Atualizar stage de um contato (kanban drag) ===
+router.put('/contacts/:id/stage', (req, res) => {
+  const { stage } = req.body || {};
+  const valid = ['novo', 'pre_qualificando', 'qualificando', 'qualificado', 'handoff', 'agendado', 'desqualificado'];
+  if (!valid.includes(stage)) return res.status(400).json({ error: `stage inválido` });
+
+  const contact = db.prepare('SELECT id FROM contacts WHERE id = ?').get(req.params.id);
+  if (!contact) return res.status(404).json({ error: 'contato não encontrado' });
+
+  db.prepare('UPDATE contacts SET stage = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(stage, req.params.id);
+  db.prepare('INSERT INTO events_log (contact_id, kind, payload) VALUES (?, ?, ?)')
+    .run(req.params.id, 'stage_changed_manual', JSON.stringify({ stage, by: req.user.id }));
+  res.json({ ok: true });
+});
+
 // === SDR assume contato ===
 router.post('/contacts/:id/assume', async (req, res) => {
   db.prepare(`

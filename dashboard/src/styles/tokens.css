@@ -1,52 +1,130 @@
-/* Design tokens da LC Agência de Comunicação
-   Paleta extraída do logo oficial:
-   - Preto forte ("LC")
-   - Magenta vivo (balão de fala claro)
-   - Magenta escuro/berry (balão de fala escuro)
-   - Cinza neutro (subtítulo "agência de comunicação")
-
-   Tipografia: Playfair Display (editorial, remete a livro) + Inter (corpo).
+/* Design system LC SDR — light + dark mode
+   Paleta extraída do logo oficial: magenta + berry + preto
 */
 
-:root {
+:root,
+[data-theme="light"] {
+  /* Brand */
   --lc-black: #111111;
   --lc-ink: #1E1E1E;
   --lc-graphite: #2C2C2C;
   --lc-stone: #6F6F6F;
   --lc-silver: #9A9A9A;
-  --lc-paper: #FAF7F3;       /* papel levemente creme */
+  --lc-paper: #FAF7F3;
   --lc-white: #FFFFFF;
   --lc-line: #EDE7DF;
+  --lc-line-strong: #D8D2C7;
 
-  /* === Brand magenta (balão claro do logo) === */
   --lc-magenta: #E6227A;
   --lc-magenta-600: #C71766;
   --lc-magenta-50: #FCE8F1;
+  --lc-magenta-25: #FEF4F8;
 
-  /* === Brand berry (balão escuro do logo) === */
   --lc-berry: #A01854;
   --lc-berry-600: #84133F;
 
-  /* Aliases de compatibilidade: mantemos os nomes "orange" usados no código
-     mapeados pro magenta, pra não ter que reescrever cada referência. */
+  /* Aliases legacy */
   --lc-orange: var(--lc-magenta);
   --lc-orange-600: var(--lc-magenta-600);
   --lc-orange-50: var(--lc-magenta-50);
 
+  /* Semantic */
   --lc-success: #2F7D4B;
+  --lc-success-bg: #E6F4EC;
   --lc-warn: #D4A017;
+  --lc-warn-bg: #FBF2D8;
   --lc-danger: #B3261E;
+  --lc-danger-bg: #FCE8E6;
+  --lc-info: #1B6BD9;
+  --lc-info-bg: #E3F0FC;
 
+  /* Surfaces */
+  --surface-bg: var(--lc-paper);
+  --surface-card: var(--lc-white);
+  --surface-elevated: var(--lc-white);
+  --surface-hover: var(--lc-magenta-25);
+  --surface-sidebar: #0F0F0F;
+  --surface-sidebar-hover: rgba(255,255,255,0.05);
+
+  --text-primary: var(--lc-ink);
+  --text-secondary: var(--lc-graphite);
+  --text-tertiary: var(--lc-stone);
+  --text-on-dark: var(--lc-white);
+
+  --border-soft: var(--lc-line);
+  --border-strong: var(--lc-line-strong);
+
+  /* Radii */
   --radius-sm: 6px;
   --radius: 10px;
-  --radius-lg: 16px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
 
-  --shadow-sm: 0 1px 2px rgba(17, 17, 17, 0.06);
-  --shadow: 0 2px 12px rgba(17, 17, 17, 0.08);
-  --shadow-brand: 0 10px 40px rgba(230, 34, 122, 0.18);
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(17, 17, 17, 0.04);
+  --shadow-sm: 0 2px 4px rgba(17, 17, 17, 0.06);
+  --shadow: 0 4px 12px rgba(17, 17, 17, 0.08);
+  --shadow-md: 0 8px 24px rgba(17, 17, 17, 0.10);
+  --shadow-lg: 0 16px 40px rgba(17, 17, 17, 0.14);
+  --shadow-magenta: 0 8px 24px rgba(230, 34, 122, 0.18);
+  --shadow-magenta-lg: 0 12px 36px rgba(230, 34, 122, 0.28);
 
+  /* Gradients premium */
+  --grad-magenta: linear-gradient(135deg, var(--lc-magenta) 0%, var(--lc-berry) 100%);
+  --grad-dark: linear-gradient(135deg, #0E0E0E 0%, #1a0712 100%);
+  --grad-paper: linear-gradient(180deg, var(--lc-paper) 0%, #F2EDE3 100%);
+  --grad-card-glow: radial-gradient(circle at top right, var(--lc-magenta-25) 0%, transparent 60%);
+
+  /* Typography */
   --font-serif: 'Playfair Display', Georgia, serif;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --transition: 200ms var(--ease-out);
+}
+
+[data-theme="dark"] {
+  --lc-paper: #0E0E0E;
+  --lc-white: #1A1A1A;
+
+  --surface-bg: #0B0B0D;
+  --surface-card: #15151A;
+  --surface-elevated: #1E1E25;
+  --surface-hover: #20202A;
+  --surface-sidebar: #08080A;
+  --surface-sidebar-hover: rgba(255,255,255,0.04);
+
+  --text-primary: #F5F2ED;
+  --text-secondary: #C8C4BB;
+  --text-tertiary: #8B8780;
+  --text-on-dark: #F5F2ED;
+
+  --border-soft: #2A2A33;
+  --border-strong: #3A3A44;
+
+  --lc-line: #2A2A33;
+  --lc-line-strong: #3A3A44;
+  --lc-stone: #8B8780;
+  --lc-ink: #F5F2ED;
+  --lc-black: #F5F2ED;
+
+  --lc-success-bg: rgba(47, 125, 75, 0.15);
+  --lc-warn-bg: rgba(212, 160, 23, 0.15);
+  --lc-danger-bg: rgba(179, 38, 30, 0.15);
+  --lc-info-bg: rgba(27, 107, 217, 0.15);
+  --lc-magenta-50: rgba(230, 34, 122, 0.12);
+  --lc-magenta-25: rgba(230, 34, 122, 0.06);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 16px 44px rgba(0, 0, 0, 0.6);
+
+  --grad-paper: linear-gradient(180deg, #0E0E0E 0%, #15151A 100%);
+  --grad-card-glow: radial-gradient(circle at top right, rgba(230, 34, 122, 0.08) 0%, transparent 60%);
 }
 
 * { box-sizing: border-box; }
@@ -55,63 +133,74 @@ html, body, #root { height: 100%; margin: 0; }
 
 body {
   font-family: var(--font-sans);
-  color: var(--lc-ink);
-  background: var(--lc-paper);
+  color: var(--text-primary);
+  background: var(--surface-bg);
   -webkit-font-smoothing: antialiased;
   font-size: 14px;
   line-height: 1.5;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
 h1, h2, h3, h4 {
   font-family: var(--font-serif);
-  color: var(--lc-black);
+  color: var(--text-primary);
   font-weight: 700;
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
-h1 { font-size: 28px; letter-spacing: -0.01em; }
+h1 { font-size: 28px; }
 h2 { font-size: 22px; }
 h3 { font-size: 17px; font-family: var(--font-sans); font-weight: 600; }
 
-a { color: var(--lc-magenta-600); text-decoration: none; }
+a { color: var(--lc-magenta-600); text-decoration: none; transition: color var(--transition); }
 a:hover { text-decoration: underline; }
 
 button {
   font-family: var(--font-sans);
   cursor: pointer;
-  border: 1px solid var(--lc-line);
-  background: var(--lc-white);
-  color: var(--lc-ink);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-card);
+  color: var(--text-primary);
   padding: 8px 14px;
   border-radius: var(--radius);
   font-size: 14px;
-  transition: all .15s;
+  transition: all var(--transition);
 }
-button:hover { border-color: var(--lc-ink); }
+button:hover { border-color: var(--text-secondary); }
 button.primary {
   background: var(--lc-black);
-  color: var(--lc-white);
+  color: var(--text-on-dark);
   border-color: var(--lc-black);
 }
-button.primary:hover { background: var(--lc-magenta); border-color: var(--lc-magenta); }
-button.accent {
-  background: var(--lc-magenta);
-  color: var(--lc-white);
-  border-color: var(--lc-magenta);
+button.primary:hover {
+  background: var(--grad-magenta);
+  border-color: transparent;
+  box-shadow: var(--shadow-magenta);
 }
-button.accent:hover { background: var(--lc-magenta-600); border-color: var(--lc-magenta-600); }
+button.accent {
+  background: var(--grad-magenta);
+  color: var(--lc-white);
+  border-color: transparent;
+  box-shadow: var(--shadow-sm);
+}
+button.accent:hover {
+  box-shadow: var(--shadow-magenta);
+  transform: translateY(-1px);
+}
 button.ghost { background: transparent; border-color: transparent; }
-button.ghost:hover { background: var(--lc-line); }
+button.ghost:hover { background: var(--surface-hover); }
 
 input, textarea, select {
   font-family: var(--font-sans);
   font-size: 14px;
   padding: 9px 12px;
-  border: 1px solid var(--lc-line);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius);
-  background: var(--lc-white);
-  color: var(--lc-ink);
+  background: var(--surface-card);
+  color: var(--text-primary);
   width: 100%;
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
 input:focus, textarea:focus, select:focus {
   outline: none;
@@ -120,40 +209,59 @@ input:focus, textarea:focus, select:focus {
 }
 
 .card {
-  background: var(--lc-white);
-  border: 1px solid var(--lc-line);
+  background: var(--surface-card);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
   padding: 20px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition), transform var(--transition);
+}
+.card.elevated { box-shadow: var(--shadow); }
+.card.glow {
+  background-image: var(--grad-card-glow);
+  background-size: cover;
+}
+.card.interactive:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
 }
 
 .tag {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
-  background: var(--lc-line);
-  color: var(--lc-ink);
+  background: var(--border-soft);
+  color: var(--text-primary);
 }
 .tag.orange, .tag.magenta { background: var(--lc-magenta-50); color: var(--lc-magenta-600); }
-.tag.berry { background: #F5E2EC; color: var(--lc-berry); }
-.tag.black { background: var(--lc-black); color: var(--lc-white); }
-.tag.success { background: #E6F4EC; color: var(--lc-success); }
-.tag.warn { background: #FBF2D8; color: #8A6800; }
-.tag.danger { background: #FCE8E6; color: var(--lc-danger); }
+.tag.berry { background: rgba(160, 24, 84, 0.12); color: var(--lc-berry); }
+.tag.black { background: var(--lc-black); color: var(--text-on-dark); }
+.tag.success { background: var(--lc-success-bg); color: var(--lc-success); }
+.tag.warn { background: var(--lc-warn-bg); color: #8A6800; }
+.tag.danger { background: var(--lc-danger-bg); color: var(--lc-danger); }
+.tag.info { background: var(--lc-info-bg); color: var(--lc-info); }
 
 .row { display: flex; gap: 12px; align-items: center; }
 .col { display: flex; flex-direction: column; gap: 12px; }
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-@media (max-width: 900px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .grid-3 { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 760px) {
+  .grid-3, .grid-4 { grid-template-columns: 1fr; }
+}
 
-.muted { color: var(--lc-stone); }
+.muted { color: var(--text-tertiary); }
 .small { font-size: 12px; }
 .mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px; }
 
-/* === Logo component (CSS-only, reproduz balões de fala do logo) === */
+/* === Logo === */
 .lc-logo {
   display: inline-flex;
   align-items: center;
@@ -162,7 +270,7 @@ input:focus, textarea:focus, select:focus {
   font-weight: 800;
   font-size: 30px;
   letter-spacing: -0.02em;
-  color: var(--lc-black);
+  color: var(--text-primary);
   line-height: 1;
 }
 .lc-logo .wordmark { font-size: 1em; }
@@ -198,15 +306,31 @@ input:focus, textarea:focus, select:focus {
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.04em;
-  color: var(--lc-stone);
+  color: var(--text-tertiary);
   line-height: 1.1;
   margin-top: 2px;
   text-transform: none;
 }
 .lc-logo.on-dark { color: var(--lc-white); }
-.lc-logo.on-dark .sub { color: var(--lc-silver); }
+.lc-logo.on-dark .sub { color: rgba(255,255,255,0.5); }
 
-/* Se o cliente subir o PNG oficial em /public/lc-logo.png, esta classe troca: */
-.lc-logo.img {
-  background: transparent;
+/* === Skeleton loader === */
+.skeleton {
+  background: linear-gradient(90deg,
+    var(--border-soft) 0%,
+    var(--surface-elevated) 50%,
+    var(--border-soft) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius);
 }
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* === Utility: scrollbar discreto === */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
