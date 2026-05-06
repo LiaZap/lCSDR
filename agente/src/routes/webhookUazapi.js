@@ -45,24 +45,45 @@ router.post('/uazapi', async (req, res) => {
   }
 
   const event = req.body || {};
-  logger.info({ type: event.type, from: event.from, id: event.id }, '[webhook uazapi]');
+
+  // === LOG VERBOSO TEMPORÁRIO ===
+  // Loga payload inteiro pra debug enquanto descobrimos o formato exato do uazapi.
+  // Ative com env LOG_WEBHOOK_FULL=true (default ativo em prod até estabilizar)
+  if (process.env.LOG_WEBHOOK_FULL !== 'false') {
+    logger.info({ payload: event, headers: req.headers }, '[webhook uazapi RAW]');
+  }
+  logger.info({ type: event.type, event_type: event.event, from: event.from || event.sender || event.chatid, id: event.id, fromMe: event.fromMe }, '[webhook uazapi]');
 
   db.prepare('INSERT INTO events_log (kind, payload) VALUES (?, ?)')
-    .run(`uazapi_${event.type || 'unknown'}`, JSON.stringify(event).slice(0, 8000));
+    .run(`uazapi_${event.type || event.event || 'unknown'}`, JSON.stringify(event).slice(0, 8000));
 
   // Resposta rápida — processa assíncrono
   res.status(200).json({ ok: true });
 
   try {
     // Ignora mensagens enviadas por mim mesmo (ecos)
-    if (event.fromMe || event.type === 'message.fromMe') return;
-    if (event.type !== 'message' && event.type !== 'messages.upsert') {
-      logger.debug({ type: event.type }, 'evento uazapi não tratado');
+    if (event.fromMe === true || event.type === 'message.fromMe') {
+      logger.info({ id: event.id }, 'webhook ignorado: fromMe=true');
       return;
     }
+
+    // Tipos aceitos — uazapi varia o nome do evento dependendo da versão.
+    // Aceita: message, messages.upsert, chat.message, message.received, ou
+    // evento sem `type` mas com payload de mensagem (tem `from` + `body`/`text`/`message`).
+    const acceptedTypes = ['message', 'messages.upsert', 'chat.message', 'message.received'];
+    const hasMessageShape = (event.from || event.sender || event.chatid) &&
+                            (event.body || event.text || event.message || event.audio || event.buttonReply || event.listReply || event.attachments?.length);
+
+    const shouldProcess = !event.type || acceptedTypes.includes(event.type) || acceptedTypes.includes(event.event) || hasMessageShape;
+
+    if (!shouldProcess) {
+      logger.warn({ type: event.type, event: event.event }, 'evento uazapi não tratado (shape não reconhecida)');
+      return;
+    }
+
     await handleInbound(event);
   } catch (err) {
-    logger.error({ err: err.message, stack: err.stack }, 'erro processando webhook uazapi');
+    logger.error({ err: err.message, stack: err.stack, event }, 'erro processando webhook uazapi');
     db.prepare('INSERT INTO events_log (kind, payload) VALUES (?, ?)')
       .run('error_uazapi', JSON.stringify({ err: err.message, event }).slice(0, 8000));
   }
@@ -94,14 +115,27 @@ function findOrCreateContactByPhone(phone, name) {
 }
 
 async function handleInbound(event) {
-  const phone = extractPhone(event.from);
-  if (!phone) return;
+  // uazapi pode mandar `from`, `sender`, ou `chatid`
+  const rawFrom = event.from || event.sender || event.chatid || event.message?.from;
+  const phone = extractPhone(rawFrom);
+  if (!phone) {
+    logger.warn({ event }, 'handleInbound: sem from/sender/chatid identificável');
+    return;
+  }
 
-  const contact = findOrCreateContactByPhone(phone, event.pushName);
+  const name = event.pushName || event.notifyName || event.senderName || event.message?.pushName;
+  const contact = findOrCreateContactByPhone(phone, name);
 
   // Tipo de mensagem
   const msgType = (event.messageType || event.message?.type || 'text').toLowerCase();
-  let content = event.body || event.message?.text || '';
+  // O texto pode vir em vários campos dependendo da versão do uazapi
+  let content = event.body
+    || event.text
+    || event.message?.text
+    || event.message?.body
+    || event.message?.conversation
+    || event.message?.extendedTextMessage?.text
+    || '';
   let content_type = 'text';
   let attachment_url = null;
 
