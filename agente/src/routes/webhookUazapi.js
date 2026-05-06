@@ -63,14 +63,15 @@ router.post('/uazapi', async (req, res) => {
   const msg = event.message || {};
   const chat = event.chat || {};
 
-  // Log resumido
+  // Log resumido (String() defensivo — uazapi às vezes manda text/content como objeto/null)
   logger.info({
     eventType,
     fromMe: msg.fromMe,
     chatid: msg.chatid || chat.wa_chatid,
     senderName: msg.senderName || chat.name,
-    text: (msg.text || msg.content || '').slice(0, 80),
+    text: String(msg.text || msg.content || '').slice(0, 80),
     messageType: msg.messageType,
+    buttonId: msg.buttonOrListid || null,
   }, '[webhook uazapi]');
 
   // Log RAW completo enquanto estabiliza (desativar com LOG_WEBHOOK_FULL=false)
@@ -166,8 +167,8 @@ async function handleInbound(event) {
   const name = msg.senderName || chat.name || chat.wa_name || null;
   const contact = findOrCreateContactByPhone(phone, name);
 
-  // Texto da mensagem
-  let content = msg.text || msg.content || '';
+  // Texto da mensagem (defensivo: força string)
+  let content = String(msg.text || msg.content || '').trim();
   let content_type = 'text';
   let attachment_url = null;
 
@@ -179,7 +180,8 @@ async function handleInbound(event) {
   // uazapi: msg.buttonOrListid traz o id que a Lila definiu como `value`
   const buttonId = msg.buttonOrListid || msg.buttonReplyId || msg.listResponseId;
   if (buttonId) {
-    content = `[lead clicou: ${msg.text || msg.content || buttonId}] (valor=${buttonId})`;
+    const label = String(msg.text || msg.content || buttonId);
+    content = `[lead clicou: ${label}] (valor=${buttonId})`;
     content_type = 'button_click';
   }
 
