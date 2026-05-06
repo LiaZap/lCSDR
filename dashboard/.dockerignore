@@ -1,0 +1,7 @@
+node_modules
+npm-debug.log
+.vite
+.git
+.DS_Store
+# NÃO ignorar dist em prod — multi-stage build precisa do source
+# dist/ é gerado no build, não vem do host

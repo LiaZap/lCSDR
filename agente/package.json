@@ -1,0 +1,36 @@
+{
+  "name": "lc-sdr-agente",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agente SDR (Iara) para LC Agência — qualifica leads via GoHighLevel + Claude API",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "init-db": "node src/db/migrate.js",
+    "ghl:test": "node scripts/test-ghl.js",
+    "ghl:bootstrap": "node scripts/bootstrap-ghl.js",
+    "ghl:simulate": "node scripts/simulate-webhook.js",
+    "uaz:status": "node scripts/test-uazapi.js status",
+    "uaz:test": "node scripts/test-uazapi.js",
+    "test:flow": "node scripts/test-flow.js",
+    "test:suite": "node scripts/test-suite.js",
+    "seed:users": "node scripts/seed-users.js",
+    "seed:demo": "node scripts/seed-demo-conversations.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "form-data": "^4.0.1",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.95.0",
+    "pino": "^9.4.0",
+    "pino-pretty": "^11.2.2"
+  }
+}

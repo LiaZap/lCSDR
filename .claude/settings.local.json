@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:lcagencia.com.br)",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "Bash(curl -s http://localhost:3333/health)",
+      "Bash(curl -s -o /dev/null -w \"Dashboard HTTP %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(curl -s -o /dev/null -w \"Dashboard: %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(docker exec *)",
+      "Bash(MSYS_NO_PATHCONV=1 docker exec lc-sdr-dashboard sh -c 'head -20 /app/src/App.jsx')",
+      "Bash(MSYS_NO_PATHCONV=1 docker exec lc-sdr-dashboard sh -c 'grep -c magenta /app/src/styles/tokens.css')",
+      "Bash(curl -s \"http://localhost:5173/src/styles/tokens.css?t=$\\(date +%s\\)\")",
+      "Bash(curl -sX POST http://localhost:3333/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"admin@lcagencia.com.br\",\"password\":\"trocar123\"}')",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(git init *)",
+      "Bash(git remote *)",
+      "Bash(git check-ignore *)",
+      "Bash(find . -name \".env\" -not -path \"*/node_modules/*\")",
+      "Bash(git add *)"
+    ]
+  }
+}

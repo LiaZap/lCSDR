@@ -1,0 +1,52 @@
+# Dependências
+node_modules/
+**/node_modules/
+
+# Banco de dados / dados persistentes
+*.db
+*.db-journal
+*.sqlite
+data/
+**/data/
+logs/
+
+# .env — NUNCA subir
+.env
+.env.local
+.env.production
+.env.*.local
+**/.env
+**/.env.local
+
+# Build artifacts
+dist/
+build/
+.vite/
+**/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Material temporário
+_extracted/
+**/_extracted/
+
+# Docs internas extraídas (manter só os .md sob version control, não os .docx originais)
+*.docx
+
+# Ngrok
+ngrok.yml

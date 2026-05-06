@@ -1,0 +1,212 @@
+/* Design tokens da LC Agência de Comunicação
+   Paleta extraída do logo oficial:
+   - Preto forte ("LC")
+   - Magenta vivo (balão de fala claro)
+   - Magenta escuro/berry (balão de fala escuro)
+   - Cinza neutro (subtítulo "agência de comunicação")
+
+   Tipografia: Playfair Display (editorial, remete a livro) + Inter (corpo).
+*/
+
+:root {
+  --lc-black: #111111;
+  --lc-ink: #1E1E1E;
+  --lc-graphite: #2C2C2C;
+  --lc-stone: #6F6F6F;
+  --lc-silver: #9A9A9A;
+  --lc-paper: #FAF7F3;       /* papel levemente creme */
+  --lc-white: #FFFFFF;
+  --lc-line: #EDE7DF;
+
+  /* === Brand magenta (balão claro do logo) === */
+  --lc-magenta: #E6227A;
+  --lc-magenta-600: #C71766;
+  --lc-magenta-50: #FCE8F1;
+
+  /* === Brand berry (balão escuro do logo) === */
+  --lc-berry: #A01854;
+  --lc-berry-600: #84133F;
+
+  /* Aliases de compatibilidade: mantemos os nomes "orange" usados no código
+     mapeados pro magenta, pra não ter que reescrever cada referência. */
+  --lc-orange: var(--lc-magenta);
+  --lc-orange-600: var(--lc-magenta-600);
+  --lc-orange-50: var(--lc-magenta-50);
+
+  --lc-success: #2F7D4B;
+  --lc-warn: #D4A017;
+  --lc-danger: #B3261E;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(17, 17, 17, 0.06);
+  --shadow: 0 2px 12px rgba(17, 17, 17, 0.08);
+  --shadow-brand: 0 10px 40px rgba(230, 34, 122, 0.18);
+
+  --font-serif: 'Playfair Display', Georgia, serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  font-family: var(--font-sans);
+  color: var(--lc-ink);
+  background: var(--lc-paper);
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-serif);
+  color: var(--lc-black);
+  font-weight: 700;
+  margin: 0;
+}
+
+h1 { font-size: 28px; letter-spacing: -0.01em; }
+h2 { font-size: 22px; }
+h3 { font-size: 17px; font-family: var(--font-sans); font-weight: 600; }
+
+a { color: var(--lc-magenta-600); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button {
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border: 1px solid var(--lc-line);
+  background: var(--lc-white);
+  color: var(--lc-ink);
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  transition: all .15s;
+}
+button:hover { border-color: var(--lc-ink); }
+button.primary {
+  background: var(--lc-black);
+  color: var(--lc-white);
+  border-color: var(--lc-black);
+}
+button.primary:hover { background: var(--lc-magenta); border-color: var(--lc-magenta); }
+button.accent {
+  background: var(--lc-magenta);
+  color: var(--lc-white);
+  border-color: var(--lc-magenta);
+}
+button.accent:hover { background: var(--lc-magenta-600); border-color: var(--lc-magenta-600); }
+button.ghost { background: transparent; border-color: transparent; }
+button.ghost:hover { background: var(--lc-line); }
+
+input, textarea, select {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--lc-line);
+  border-radius: var(--radius);
+  background: var(--lc-white);
+  color: var(--lc-ink);
+  width: 100%;
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--lc-magenta);
+  box-shadow: 0 0 0 3px var(--lc-magenta-50);
+}
+
+.card {
+  background: var(--lc-white);
+  border: 1px solid var(--lc-line);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--lc-line);
+  color: var(--lc-ink);
+}
+.tag.orange, .tag.magenta { background: var(--lc-magenta-50); color: var(--lc-magenta-600); }
+.tag.berry { background: #F5E2EC; color: var(--lc-berry); }
+.tag.black { background: var(--lc-black); color: var(--lc-white); }
+.tag.success { background: #E6F4EC; color: var(--lc-success); }
+.tag.warn { background: #FBF2D8; color: #8A6800; }
+.tag.danger { background: #FCE8E6; color: var(--lc-danger); }
+
+.row { display: flex; gap: 12px; align-items: center; }
+.col { display: flex; flex-direction: column; gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+@media (max-width: 900px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .grid-3 { grid-template-columns: 1fr; } }
+
+.muted { color: var(--lc-stone); }
+.small { font-size: 12px; }
+.mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px; }
+
+/* === Logo component (CSS-only, reproduz balões de fala do logo) === */
+.lc-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-sans);
+  font-weight: 800;
+  font-size: 30px;
+  letter-spacing: -0.02em;
+  color: var(--lc-black);
+  line-height: 1;
+}
+.lc-logo .wordmark { font-size: 1em; }
+.lc-logo .bubbles {
+  position: relative;
+  width: 34px;
+  height: 28px;
+  flex-shrink: 0;
+}
+.lc-logo .bubbles::before,
+.lc-logo .bubbles::after {
+  content: "";
+  position: absolute;
+  border-radius: 50% 50% 50% 4px;
+}
+.lc-logo .bubbles::before {
+  width: 20px;
+  height: 20px;
+  background: var(--lc-berry);
+  left: 0;
+  top: 2px;
+}
+.lc-logo .bubbles::after {
+  width: 22px;
+  height: 22px;
+  background: var(--lc-magenta);
+  right: 0;
+  top: 0;
+}
+.lc-logo .sub {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--lc-stone);
+  line-height: 1.1;
+  margin-top: 2px;
+  text-transform: none;
+}
+.lc-logo.on-dark { color: var(--lc-white); }
+.lc-logo.on-dark .sub { color: var(--lc-silver); }
+
+/* Se o cliente subir o PNG oficial em /public/lc-logo.png, esta classe troca: */
+.lc-logo.img {
+  background: transparent;
+}

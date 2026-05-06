@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log
+data
+logs
+*.db
+*.db-journal
+.env
+.env.local
+.git
+.DS_Store

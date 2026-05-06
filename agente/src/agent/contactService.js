@@ -1,0 +1,59 @@
+import { db } from '../db/index.js';
+import { GHL } from '../ghl/client.js';
+import { logger } from '../utils/logger.js';
+
+export function upsertContactFromGHL(ghlContact) {
+  const existing = db.prepare('SELECT * FROM contacts WHERE ghl_contact_id = ?').get(ghlContact.id);
+  if (existing) {
+    db.prepare(`
+      UPDATE contacts
+      SET name = COALESCE(?, name),
+          phone = COALESCE(?, phone),
+          email = COALESCE(?, email),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      ghlContact.name || `${ghlContact.firstName || ''} ${ghlContact.lastName || ''}`.trim() || null,
+      ghlContact.phone || null,
+      ghlContact.email || null,
+      existing.id
+    );
+    return db.prepare('SELECT * FROM contacts WHERE id = ?').get(existing.id);
+  }
+
+  const info = db.prepare(`
+    INSERT INTO contacts (ghl_contact_id, name, phone, email, stage)
+    VALUES (?, ?, ?, ?, 'novo')
+  `).run(
+    ghlContact.id,
+    ghlContact.name || `${ghlContact.firstName || ''} ${ghlContact.lastName || ''}`.trim() || null,
+    ghlContact.phone || null,
+    ghlContact.email || null,
+  );
+  return db.prepare('SELECT * FROM contacts WHERE id = ?').get(info.lastInsertRowid);
+}
+
+export function recordInbound(contactId, { content, content_type = 'text', ghl_message_id = null, attachment_url = null }) {
+  db.prepare(`
+    INSERT INTO messages (contact_id, ghl_message_id, direction, author, content, content_type, raw_attachment_url)
+    VALUES (?, ?, 'inbound', 'lead', ?, ?, ?)
+  `).run(contactId, ghl_message_id, content, content_type, attachment_url);
+  db.prepare('UPDATE contacts SET last_inbound_at = CURRENT_TIMESTAMP WHERE id = ?').run(contactId);
+}
+
+export function recordOutbound(contactId, { author = 'ia', content, sdr_id = null, usage = {} }) {
+  const { tokens_in = 0, tokens_out = 0, cost_usd = 0 } = usage;
+  db.prepare(`
+    INSERT INTO messages (contact_id, direction, author, sdr_id, content, tokens_in, tokens_out, cost_usd)
+    VALUES (?, 'outbound', ?, ?, ?, ?, ?, ?)
+  `).run(contactId, author, sdr_id, content, tokens_in, tokens_out, cost_usd);
+  db.prepare('UPDATE contacts SET last_outbound_at = CURRENT_TIMESTAMP WHERE id = ?').run(contactId);
+}
+
+export function countMessagesToday(contactId) {
+  const row = db.prepare(`
+    SELECT COUNT(*) as c FROM messages
+    WHERE contact_id = ? AND date(created_at) = date('now')
+  `).get(contactId);
+  return row?.c || 0;
+}

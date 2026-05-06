@@ -1,0 +1,54 @@
+# docker-compose pra produção (EasyPanel ou similar)
+# Diferenças vs docker-compose.yml (dev):
+#  - Dashboard usa build estática + nginx (sem hot reload)
+#  - Sem bind-mount de código (imagens são imutáveis em prod)
+#  - Volumes nomeados pra persistência
+#  - Healthcheck robusto
+
+services:
+  agente:
+    build:
+      context: ./agente
+      dockerfile: Dockerfile
+    image: lcsdr-agente
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3333
+    # Em produção, NÃO expor a porta 3333 ao host — só via rede interna pro dashboard
+    # No EasyPanel, deixe a porta privada (sem domínio nesse serviço)
+    expose:
+      - "3333"
+    volumes:
+      - lcsdr_data:/app/data
+    networks:
+      - lcsdr-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3333/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile.prod
+    image: lcsdr-dashboard
+    restart: unless-stopped
+    # Esse é o serviço que ganha o domínio público no EasyPanel
+    ports:
+      - "80:80"
+    depends_on:
+      agente:
+        condition: service_healthy
+    networks:
+      - lcsdr-net
+
+volumes:
+  lcsdr_data:
+    # SQLite + uploads. NUNCA apague esse volume sem backup.
+
+networks:
+  lcsdr-net:
+    driver: bridge
