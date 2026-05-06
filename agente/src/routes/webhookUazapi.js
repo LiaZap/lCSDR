@@ -19,18 +19,32 @@ const MAX_MSGS_DAY = Number(process.env.MAX_MESSAGES_PER_CONVERSATION_PER_DAY ||
 // === Webhook do uazapi ===
 // Configurar no painel uazapi → Webhooks: POST https://seu-dominio/webhook/uazapi
 //
-// Formato esperado (uazapi pode variar; ajuste conforme docs do provider):
+// FORMATO REAL do uazapi (capturado em prod, 2026-05-06):
 // {
-//   "type": "message",
-//   "fromMe": false,
-//   "from": "5511999999999@s.whatsapp.net" | "5511999999999",
-//   "pushName": "Nome do Contato",
-//   "id": "msg_id",
-//   "messageType": "text" | "audio" | "image" | "document" | "buttonResponse" | "listResponse",
-//   "body": "texto",
-//   "audio": { "url": "...", "mimetype": "..." },
-//   "buttonReply": { "id": "valor_do_botao", "title": "Label" },
-//   "listReply": { "id": "valor", "title": "Label" }
+//   "EventType": "messages",
+//   "owner": "5551926342449",
+//   "token": "...",
+//   "chat": {
+//     "id": "...",
+//     "phone": "+55 11 98795-9188",
+//     "name": "Paulo Melo",
+//     "wa_chatid": "5511987959188@s.whatsapp.net",
+//     ...
+//   },
+//   "message": {
+//     "id": "...",
+//     "fromMe": false,
+//     "chatid": "5511987959188@s.whatsapp.net",
+//     "sender": "162801037402112@lid",
+//     "sender_pn": "5511987959188@s.whatsapp.net",
+//     "senderName": "Paulo Melo",
+//     "text": "oi",
+//     "content": "oi",
+//     "messageType": "Conversation" | "audio" | "image" | "document",
+//     "mediaType": "" | "audio" | "image" | ...,
+//     "buttonOrListid": "",
+//     ...
+//   }
 // }
 
 router.post('/uazapi', async (req, res) => {
@@ -45,60 +59,85 @@ router.post('/uazapi', async (req, res) => {
   }
 
   const event = req.body || {};
+  const eventType = event.EventType || event.eventType || event.type || event.event;
+  const msg = event.message || {};
+  const chat = event.chat || {};
 
-  // === LOG VERBOSO TEMPORÁRIO ===
-  // Loga payload inteiro pra debug enquanto descobrimos o formato exato do uazapi.
-  // Ative com env LOG_WEBHOOK_FULL=true (default ativo em prod até estabilizar)
+  // Log resumido
+  logger.info({
+    eventType,
+    fromMe: msg.fromMe,
+    chatid: msg.chatid || chat.wa_chatid,
+    senderName: msg.senderName || chat.name,
+    text: (msg.text || msg.content || '').slice(0, 80),
+    messageType: msg.messageType,
+  }, '[webhook uazapi]');
+
+  // Log RAW completo enquanto estabiliza (desativar com LOG_WEBHOOK_FULL=false)
   if (process.env.LOG_WEBHOOK_FULL !== 'false') {
-    logger.info({ payload: event, headers: req.headers }, '[webhook uazapi RAW]');
+    logger.info({ payload: event }, '[webhook uazapi RAW]');
   }
-  logger.info({ type: event.type, event_type: event.event, from: event.from || event.sender || event.chatid, id: event.id, fromMe: event.fromMe }, '[webhook uazapi]');
 
   db.prepare('INSERT INTO events_log (kind, payload) VALUES (?, ?)')
-    .run(`uazapi_${event.type || event.event || 'unknown'}`, JSON.stringify(event).slice(0, 8000));
+    .run(`uazapi_${eventType || 'unknown'}`, JSON.stringify(event).slice(0, 8000));
 
   // Resposta rápida — processa assíncrono
   res.status(200).json({ ok: true });
 
   try {
-    // Ignora mensagens enviadas por mim mesmo (ecos)
-    if (event.fromMe === true || event.type === 'message.fromMe') {
-      logger.info({ id: event.id }, 'webhook ignorado: fromMe=true');
+    // Ignora mensagens enviadas por mim mesmo
+    if (msg.fromMe === true || msg.wasSentByApi === true) {
+      logger.info({ id: msg.id }, 'webhook ignorado: fromMe ou wasSentByApi');
       return;
     }
 
-    // Tipos aceitos — uazapi varia o nome do evento dependendo da versão.
-    // Aceita: message, messages.upsert, chat.message, message.received, ou
-    // evento sem `type` mas com payload de mensagem (tem `from` + `body`/`text`/`message`).
-    const acceptedTypes = ['message', 'messages.upsert', 'chat.message', 'message.received'];
-    const hasMessageShape = (event.from || event.sender || event.chatid) &&
-                            (event.body || event.text || event.message || event.audio || event.buttonReply || event.listReply || event.attachments?.length);
+    // Aceita: EventType "messages" (uazapi padrão), ou qualquer evento que
+    // tenha shape de mensagem (message.text + message.chatid)
+    const isMessageEvent = eventType === 'messages'
+      || eventType === 'message'
+      || eventType === 'messages.upsert'
+      || (msg.chatid && (msg.text || msg.content || msg.mediaType));
 
-    const shouldProcess = !event.type || acceptedTypes.includes(event.type) || acceptedTypes.includes(event.event) || hasMessageShape;
-
-    if (!shouldProcess) {
-      logger.warn({ type: event.type, event: event.event }, 'evento uazapi não tratado (shape não reconhecida)');
+    if (!isMessageEvent) {
+      logger.warn({ eventType }, 'evento uazapi não é mensagem, ignorando');
       return;
     }
 
     await handleInbound(event);
   } catch (err) {
-    logger.error({ err: err.message, stack: err.stack, event }, 'erro processando webhook uazapi');
+    logger.error({ err: err.message, stack: err.stack }, 'erro processando webhook uazapi');
     db.prepare('INSERT INTO events_log (kind, payload) VALUES (?, ?)')
       .run('error_uazapi', JSON.stringify({ err: err.message, event }).slice(0, 8000));
   }
 });
 
-function extractPhone(rawFrom) {
-  if (!rawFrom) return null;
-  // formatos comuns: "5511999999999@s.whatsapp.net", "5511999999999"
-  const digits = String(rawFrom).split('@')[0].replace(/\D/g, '');
-  return digits || null;
+// Extrai phone E.164 (5511...) de qualquer um dos formatos uazapi
+function extractPhone(event) {
+  const msg = event.message || {};
+  const chat = event.chat || {};
+
+  // Preferência: chatid normalizado (5511987959188@s.whatsapp.net)
+  // Fallback: chat.phone formatado ("+55 11 98795-9188") ou sender_pn
+  const candidates = [
+    msg.chatid,
+    msg.sender_pn,
+    chat.wa_chatid,
+    chat.phone,
+    msg.from,
+    msg.sender,
+  ];
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+    // Tira "@s.whatsapp.net", "@lid", espaços, +, hífens
+    const digits = String(raw).split('@')[0].replace(/\D/g, '');
+    // sender pode vir como "162801037402112@lid" (id interno, não phone) — descartar se menor que 10 dígitos
+    if (digits && digits.length >= 10) return digits;
+  }
+  return null;
 }
 
 function findOrCreateContactByPhone(phone, name) {
-  // No fluxo uazapi puro, usamos `phone` como chave (não temos GHL contactId).
-  // Convencionamos ghl_contact_id = `wa-${phone}` quando o canal é uazapi.
   const ghlId = `wa-${phone}`;
   let contact = db.prepare('SELECT * FROM contacts WHERE ghl_contact_id = ?').get(ghlId);
   if (!contact) {
@@ -115,49 +154,42 @@ function findOrCreateContactByPhone(phone, name) {
 }
 
 async function handleInbound(event) {
-  // uazapi pode mandar `from`, `sender`, ou `chatid`
-  const rawFrom = event.from || event.sender || event.chatid || event.message?.from;
-  const phone = extractPhone(rawFrom);
+  const msg = event.message || {};
+  const chat = event.chat || {};
+
+  const phone = extractPhone(event);
   if (!phone) {
-    logger.warn({ event }, 'handleInbound: sem from/sender/chatid identificável');
+    logger.warn({ event }, 'handleInbound: sem phone identificável');
     return;
   }
 
-  const name = event.pushName || event.notifyName || event.senderName || event.message?.pushName;
+  const name = msg.senderName || chat.name || chat.wa_name || null;
   const contact = findOrCreateContactByPhone(phone, name);
 
-  // Tipo de mensagem
-  const msgType = (event.messageType || event.message?.type || 'text').toLowerCase();
-  // O texto pode vir em vários campos dependendo da versão do uazapi
-  let content = event.body
-    || event.text
-    || event.message?.text
-    || event.message?.body
-    || event.message?.conversation
-    || event.message?.extendedTextMessage?.text
-    || '';
+  // Texto da mensagem
+  let content = msg.text || msg.content || '';
   let content_type = 'text';
   let attachment_url = null;
 
-  // Botão / lista clicado — vem com o `value` que a Lila definiu
-  const buttonReply = event.buttonReply || event.message?.buttonReply;
-  const listReply = event.listReply || event.message?.listReply;
-  if (buttonReply || listReply) {
-    const reply = buttonReply || listReply;
-    content = `[lead clicou: ${reply.title || reply.id}]`;
-    // Adiciona o value como hint pra Lila contextualizar
-    if (reply.id && reply.id !== reply.title) content += ` (valor=${reply.id})`;
+  // Tipo da mídia (uazapi usa mediaType ou messageType)
+  const mediaType = (msg.mediaType || '').toLowerCase();
+  const messageType = (msg.messageType || '').toLowerCase();
+
+  // Botão / lista clicado
+  // uazapi: msg.buttonOrListid traz o id que a Lila definiu como `value`
+  const buttonId = msg.buttonOrListid || msg.buttonReplyId || msg.listResponseId;
+  if (buttonId) {
+    content = `[lead clicou: ${msg.text || msg.content || buttonId}] (valor=${buttonId})`;
     content_type = 'button_click';
   }
 
   // Áudio
-  if (msgType === 'audio' || event.audio) {
-    const url = event.audio?.url || event.message?.audio?.url;
+  if (mediaType === 'audio' || messageType === 'audio' || msg.audio || msg.audioUrl) {
+    const url = msg.audioUrl || msg.audio?.url || msg.mediaUrl;
     attachment_url = url;
     try {
-      // uazapi geralmente serve áudio em URL pública (sem auth) ou base64
-      const audioData = event.audio?.base64 || event.message?.audio?.base64;
       let buf;
+      const audioData = msg.audio?.base64 || msg.mediaBase64;
       if (audioData) {
         buf = Buffer.from(audioData, 'base64');
       } else if (url) {
@@ -174,13 +206,13 @@ async function handleInbound(event) {
     }
   }
 
-  // PDF / arquivo
-  const docUrl = event.document?.url || event.message?.document?.url;
-  if (msgType === 'document' || docUrl) {
+  // Documento / PDF — bloqueia, não tenta analisar
+  if (mediaType === 'document' || messageType === 'document' || msg.documentUrl) {
+    const url = msg.documentUrl || msg.mediaUrl;
     recordInbound(contact.id, {
-      content: `[lead enviou arquivo: ${docUrl || '?'}]`,
+      content: `[lead enviou arquivo: ${url || '?'}]`,
       content_type: 'pdf_blocked',
-      attachment_url: docUrl,
+      attachment_url: url,
     });
     const txt = 'Opa, análise de arquivo a gente faz na etapa de leitura crítica com a equipe. Me conta em texto: o livro já está finalizado?';
     await sendText(contact, txt).catch(err => logger.error({ err: err.message }, 'send fail'));
@@ -188,24 +220,37 @@ async function handleInbound(event) {
     return;
   }
 
+  // Imagem — registra mas não tenta analisar
+  if (mediaType === 'image' || messageType === 'image') {
+    attachment_url = msg.imageUrl || msg.mediaUrl;
+    content = content || '[lead enviou uma imagem]';
+    content_type = 'image';
+  }
+
+  if (!content || !content.trim()) {
+    logger.warn({ phone, mediaType, messageType }, 'mensagem vazia, ignorando');
+    return;
+  }
+
   recordInbound(contact.id, { content, content_type, attachment_url });
 
-  // Se IA pausada (humano assumiu) → não responde
+  // Se IA pausada → não responde
   const fresh = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id);
   if (fresh.ai_paused) {
+    logger.info({ contactId: fresh.id }, 'IA pausada (SDR no controle), só registrando');
     scheduleFollowup(contact.id, 'silencio_sdr');
     return;
   }
 
   if (countMessagesToday(contact.id) > MAX_MSGS_DAY) {
+    logger.warn({ contactId: contact.id }, 'limite diário atingido, pausando IA');
     pauseIA(contact.id, 'limite_mensagens_dia');
     return;
   }
 
-  // Gera resposta da Lila
+  // Gera resposta
   const result = await generateLilaReply({ contact: fresh, incomingText: content });
 
-  // Envia (canal uazapi escolhido via messenger)
   const items = result.split && result.split.length ? result.split : [result.reply];
   await sendSequence(fresh, items);
   for (const item of items) {
