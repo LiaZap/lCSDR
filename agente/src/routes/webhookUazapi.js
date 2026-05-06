@@ -155,9 +155,33 @@ function extractPhone(event) {
 //   ContactMessage           → contato vCard (ignora)
 //   ButtonsResponseMessage / TemplateButtonReplyMessage → resposta de botão
 //   ListResponseMessage      → resposta de lista
+// Coage qualquer valor pra string limpa.
+// Uazapi às vezes manda text/content como objeto (ex: {conversation: "oi"})
+// ou como null/undefined. Esse helper garante que sempre retornamos string.
+function safeString(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (typeof v === 'object') {
+    // Tenta extrair texto de objetos aninhados comuns do Baileys
+    if (typeof v.conversation === 'string') return v.conversation;
+    if (typeof v.text === 'string') return v.text;
+    if (typeof v.body === 'string') return v.body;
+    if (typeof v.caption === 'string') return v.caption;
+    return '';
+  }
+  return String(v);
+}
+
 function classifyMessage(msg) {
-  const rawType = String(msg.messageType || msg.mediaType || '').toLowerCase();
-  const text = String(msg.text || msg.content || msg.caption || '').trim();
+  const rawType = safeString(msg.messageType || msg.mediaType).toLowerCase();
+  // Tenta vários campos defensivamente, sempre coagindo pra string
+  const text = (
+    safeString(msg.text) ||
+    safeString(msg.content) ||
+    safeString(msg.caption) ||
+    safeString(msg.body)
+  ).trim();
   const buttonId = msg.buttonOrListid || msg.buttonReplyId || msg.listResponseId;
 
   // Botão/lista clicado tem prioridade — vem como mensagem normal mas com buttonOrListid setado
