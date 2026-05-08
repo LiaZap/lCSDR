@@ -7,9 +7,20 @@ import bcrypt from 'bcryptjs';
 import { db } from '../src/db/index.js';
 
 const USERS = [
-  { name: 'Lilian Cardoso', email: 'lilian@lcagencia.com.br', password: 'LCagencia2026', role: 'admin' },
-  { name: 'Bruna',          email: 'bruna@lcagencia.com.br',  password: 'LCagencia2026', role: 'admin' },
-  { name: 'Paulo',          email: 'paulo@bep.media',         password: 'BEP2026',        role: 'admin' },
+  // Admins LC
+  { name: 'Lilian Cardoso', email: 'lilian@lcagencia.com.br',  password: 'LCagencia2026', role: 'admin' },
+  { name: 'Bruna',          email: 'bruna@lcagencia.com.br',   password: 'LCagencia2026', role: 'admin' },
+
+  // Time comercial LC (testers do mutirão de sábado)
+  { name: 'Gabriel',  email: 'gabriel@lcagencia.com.br',  password: 'LCagencia2026', role: 'sdr' },
+  { name: 'Andressa', email: 'andressa@lcagencia.com.br', password: 'LCagencia2026', role: 'closer' },
+  { name: 'Brenda',   email: 'brenda@lcagencia.com.br',   password: 'LCagencia2026', role: 'admin' },
+  { name: 'Vítor',    email: 'vitor@lcagencia.com.br',    password: 'LCagencia2026', role: 'closer' },
+  { name: 'Isabella', email: 'isabella@lcagencia.com.br', password: 'LCagencia2026', role: 'admin' },
+
+  // BEP (executor do projeto)
+  { name: 'Paulo', email: 'paulo@bep.media', password: 'BEP2026', role: 'admin' },
+  { name: 'Pedro', email: 'pedro@bep.media', password: 'BEP2026', role: 'admin' },
 ];
 
 for (const u of USERS) {

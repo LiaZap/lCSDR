@@ -10,6 +10,16 @@ const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
 const COST_IN_PER_MTOK = 3.0;
 const COST_OUT_PER_MTOK = 15.0;
 
+// Detecta nome "lixo" (números, vazio, padrões esquisitos do WhatsApp)
+function sanitizeName(rawName) {
+  if (!rawName || typeof rawName !== 'string') return null;
+  const name = rawName.trim();
+  if (!name || name.length < 2) return null;
+  if (/\d/.test(name)) return null;
+  if (/^[\W_]+$/.test(name)) return null;
+  return name;
+}
+
 function buildHistory(contactId, limit = 30) {
   const rows = db.prepare(`
     SELECT direction, author, content, content_type, created_at
@@ -50,9 +60,10 @@ export async function generateLilaReplyAnthropic({ contact, incomingText }) {
     history.push({ role: 'user', content: incomingText });
   }
 
+  const usableName = sanitizeName(contact.name);
   const meta = `
 Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
-- Nome: ${contact.name || 'desconhecido'}
+- Nome: ${usableName || '⚠ AINDA NÃO CONHECIDO — use saudação genérica tipo "Olá!" sem nome até o lead se apresentar'}
 - Funil detectado até agora: ${contact.funnel || 'ainda não identificado'}
 - Estágio: ${contact.stage || 'novo'}
 - Última nota de qualificação: ${contact.qualification_notes || 'nenhuma'}

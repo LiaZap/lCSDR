@@ -25,6 +25,25 @@ router.get('/metrics', (req, res) => {
     WHERE ${NOT_PG} AND c.created_at >= datetime('now', '-' || ? || ' days')
   `).get(days);
 
+  // Tempo médio de 1ª resposta (entre primeira mensagem inbound e primeira outbound da IA)
+  // Útil pro Lilian ver que a Lila responde em segundos vs SDR humano que demora horas
+  const tempoResposta = db.prepare(`
+    SELECT AVG(diff_seconds) as media, MIN(diff_seconds) as menor, MAX(diff_seconds) as maior
+    FROM (
+      SELECT
+        c.id,
+        (julianday(MIN(CASE WHEN m.author='ia' THEN m.created_at END))
+         - julianday(MIN(CASE WHEN m.direction='inbound' THEN m.created_at END))
+        ) * 86400 AS diff_seconds
+      FROM contacts c
+      JOIN messages m ON m.contact_id = c.id
+      WHERE c.ghl_contact_id NOT LIKE 'playground-%'
+        AND c.created_at >= datetime('now', '-' || ? || ' days')
+      GROUP BY c.id
+      HAVING diff_seconds IS NOT NULL AND diff_seconds > 0
+    )
+  `).get(days);
+
   const porFunil = db.prepare(`
     SELECT COALESCE(funnel, 'indefinido') as funnel, COUNT(*) as total
     FROM contacts c
@@ -52,7 +71,18 @@ router.get('/metrics', (req, res) => {
     ORDER BY dia ASC
   `).all(days);
 
-  res.json({ totais, porFunil, custo, porDia });
+  // Volume por hora do dia (heatmap futuro / horário de pico)
+  const porHora = db.prepare(`
+    SELECT
+      CAST(strftime('%H', c.created_at) AS INTEGER) as hora,
+      COUNT(*) as total
+    FROM contacts c
+    WHERE ${NOT_PG} AND c.created_at >= datetime('now', '-' || ? || ' days')
+    GROUP BY hora
+    ORDER BY hora
+  `).all(days);
+
+  res.json({ totais, porFunil, custo, porDia, porHora, tempoResposta });
 });
 
 // === Lista de contatos com filtros ===

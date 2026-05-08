@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS contacts (
   ai_paused_at DATETIME,
   last_inbound_at DATETIME,
   last_outbound_at DATETIME,
+  -- Origem/campanha (fase 2): rastreio de qual campanha trouxe o lead
+  -- Ex: "curso_admiraveis_nov", "imersao_sp_jan", "press_lc_organic"
+  campaign_source TEXT,
+  campaign_tags TEXT,             -- JSON array: ["curso_admiraveis","novembro_2026"]
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

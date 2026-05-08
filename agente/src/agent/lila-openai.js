@@ -110,6 +110,20 @@ const LILA_SCHEMA = {
   },
 };
 
+// Detecta nome "lixo" (números, vazio, padrões esquisitos do WhatsApp)
+function sanitizeContactName(rawName) {
+  if (!rawName || typeof rawName !== 'string') return null;
+  const name = rawName.trim();
+  if (!name) return null;
+  // Sem dígitos no nome (descarta "Lead 5511...", "+5511...", etc)
+  if (/\d/.test(name)) return null;
+  // Muito curto (provavelmente lixo)
+  if (name.length < 2) return null;
+  // Padrão de telefone disfarçado (só caracteres ou pontos)
+  if (/^[\W_]+$/.test(name)) return null;
+  return name;
+}
+
 function buildHistory(contactId, limit = 30) {
   const rows = db.prepare(`
     SELECT direction, author, content, content_type, created_at
@@ -132,9 +146,10 @@ export async function generateLilaReplyOpenAI({ contact, incomingText }) {
     history.push({ role: 'user', content: incomingText });
   }
 
+  const usableName = sanitizeContactName(contact.name);
   const meta = `
 Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
-- Nome: ${contact.name || 'desconhecido'}
+- Nome: ${usableName || '⚠ AINDA NÃO CONHECIDO — use saudação genérica tipo "Olá!" sem nome até o lead se apresentar'}
 - Funil detectado até agora: ${contact.funnel || 'ainda não identificado'}
 - Estágio: ${contact.stage || 'novo'}
 - Última nota de qualificação: ${contact.qualification_notes || 'nenhuma'}

@@ -33,6 +33,8 @@ export default function Overview() {
   const totais = data?.totais || {};
   const porFunil = data?.porFunil || [];
   const porDia = data?.porDia || [];
+  const porHora = data?.porHora || [];
+  const tempoResposta = data?.tempoResposta || {};
 
   const totalLeads = totais.leads || 0;
   const qualificados = totais.qualificados || 0;
@@ -43,8 +45,8 @@ export default function Overview() {
 
   // Insights automáticos baseados nos dados — useMemo PRECISA vir antes do early return
   const insights = useMemo(
-    () => generateInsights({ porDia, porFunil, taxaQualificacao, totalLeads }),
-    [porDia, porFunil, taxaQualificacao, totalLeads]
+    () => generateInsights({ porDia, porFunil, porHora, tempoResposta, taxaQualificacao, totalLeads }),
+    [porDia, porFunil, porHora, tempoResposta, taxaQualificacao, totalLeads]
   );
 
   if (!data) return <SkeletonOverview />;
@@ -272,11 +274,22 @@ function KpiCard({ label, value, hint, spark, sparkColor, delta, gradient }) {
   );
 }
 
-function generateInsights({ porDia, porFunil, taxaQualificacao, totalLeads }) {
+function generateInsights({ porDia, porFunil, porHora, tempoResposta, taxaQualificacao, totalLeads }) {
   if (totalLeads === 0) return [];
   const ins = [];
 
-  // Insight 1: tendência (último dia vs penúltimo)
+  // Insight 1: tempo médio de resposta da Lila — número que vende
+  if (tempoResposta?.media && tempoResposta.media < 600) {
+    const seg = Math.round(tempoResposta.media);
+    ins.push({
+      icon: '⚡',
+      title: `Resposta em ${seg < 60 ? `${seg}s` : `${Math.round(seg / 60)}min`}`,
+      detail: 'Lila responde antes do lead esfriar',
+      color: 'var(--lc-success)',
+    });
+  }
+
+  // Insight 2: tendência (último dia vs penúltimo)
   if (porDia.length >= 2) {
     const last = porDia[porDia.length - 1];
     const prev = porDia[porDia.length - 2];
@@ -292,30 +305,30 @@ function generateInsights({ porDia, porFunil, taxaQualificacao, totalLeads }) {
       ins.push({
         icon: '📉',
         title: `${diff} leads vs dia anterior`,
-        detail: `Tráfego em queda — checar criativos`,
+        detail: 'Tráfego em queda, checar criativos',
         color: 'var(--lc-warn)',
       });
     }
   }
 
-  // Insight 2: taxa de qualificação
+  // Insight 3: taxa de qualificação
   if (taxaQualificacao >= 25) {
     ins.push({
       icon: '🎯',
       title: `${taxaQualificacao}% de conversão`,
-      detail: 'Acima da média — Lila qualificando bem',
+      detail: 'Acima da média, Lila qualificando bem',
       color: 'var(--lc-success)',
     });
   } else if (taxaQualificacao < 15 && totalLeads >= 10) {
     ins.push({
       icon: '⚠',
       title: `${taxaQualificacao}% qualificação baixa`,
-      detail: 'Refinar prompt ou revisar criativos de tráfego',
+      detail: 'Refinar prompt ou revisar criativos',
       color: 'var(--lc-warn)',
     });
   }
 
-  // Insight 3: top funil
+  // Insight 4: top funil
   const topFunil = [...porFunil].sort((a, b) => b.total - a.total)[0];
   if (topFunil && topFunil.funnel !== 'indefinido') {
     ins.push({
@@ -326,7 +339,20 @@ function generateInsights({ porDia, porFunil, taxaQualificacao, totalLeads }) {
     });
   }
 
-  return ins.slice(0, 3);
+  // Insight 5: hora de pico
+  if (porHora.length > 0) {
+    const peak = [...porHora].sort((a, b) => b.total - a.total)[0];
+    if (peak && peak.total >= 3) {
+      ins.push({
+        icon: '⏰',
+        title: `Pico às ${String(peak.hora).padStart(2, '0')}h`,
+        detail: `${peak.total} leads nesse horário, melhor pra rodar tráfego`,
+        color: 'var(--lc-magenta)',
+      });
+    }
+  }
+
+  return ins.slice(0, 4);
 }
 
 function SkeletonOverview() {

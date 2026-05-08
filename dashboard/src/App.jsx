@@ -10,6 +10,7 @@ import Conversations from './pages/Conversations.jsx';
 import Leads from './pages/Leads.jsx';
 import LeadDetail from './pages/LeadDetail.jsx';
 import Playground from './pages/Playground.jsx';
+import Feedback from './pages/Feedback.jsx';
 
 function Shell({ children }) {
   const user = getUser();
@@ -40,6 +41,9 @@ function Shell({ children }) {
           </NavLink>
           <NavLink to="/playground">
             <Icon.Play className="nav-ico" /> Playground
+          </NavLink>
+          <NavLink to="/feedback">
+            <Icon.Check className="nav-ico" /> Feedback
           </NavLink>
         </nav>
 
@@ -78,6 +82,7 @@ export default function App() {
       <Route path="/leads" element={<Shell><Leads /></Shell>} />
       <Route path="/leads/:id" element={<Shell><LeadDetail /></Shell>} />
       <Route path="/playground" element={<Shell><Playground /></Shell>} />
+      <Route path="/feedback" element={<Shell><Feedback /></Shell>} />
     </Routes>
   );
 }

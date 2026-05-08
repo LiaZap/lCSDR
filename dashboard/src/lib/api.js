@@ -58,6 +58,19 @@ export const api = {
       body: JSON.stringify({ stage }),
     });
   },
+  feedback(contactId, verdict, comment) {
+    return request(`/api/contacts/${contactId}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify({ verdict, comment }),
+    });
+  },
+  feedbacks(verdict) {
+    const qs = verdict ? `?verdict=${verdict}` : '';
+    return request(`/api/feedback${qs}`);
+  },
+  feedbackSummary() {
+    return request('/api/feedback/summary');
+  },
   release(id) {
     return request(`/api/contacts/${id}/release`, { method: 'POST' });
   },
