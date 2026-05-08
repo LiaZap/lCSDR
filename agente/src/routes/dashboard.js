@@ -121,7 +121,7 @@ router.get('/contacts/:id', (req, res) => {
   const messages = db.prepare(`
     SELECT id, direction, author, content, content_type, created_at
     FROM messages WHERE contact_id = ?
-    ORDER BY created_at ASC
+    ORDER BY created_at ASC, id ASC
   `).all(req.params.id);
 
   const feedbacks = db.prepare(`

@@ -127,7 +127,9 @@ function sanitizeContactName(rawName) {
 function buildHistory(contactId, limit = 30) {
   const rows = db.prepare(`
     SELECT direction, author, content, content_type, created_at
-    FROM messages WHERE contact_id = ? ORDER BY created_at ASC LIMIT ?
+    FROM messages WHERE contact_id = ?
+    ORDER BY created_at ASC, id ASC
+    LIMIT ?
   `).all(contactId, limit);
 
   return rows.map(m => {

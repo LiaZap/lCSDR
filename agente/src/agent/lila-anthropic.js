@@ -25,7 +25,7 @@ function buildHistory(contactId, limit = 30) {
     SELECT direction, author, content, content_type, created_at
     FROM messages
     WHERE contact_id = ?
-    ORDER BY created_at ASC
+    ORDER BY created_at ASC, id ASC
     LIMIT ?
   `).all(contactId, limit);
 

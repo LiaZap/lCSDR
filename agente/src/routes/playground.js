@@ -73,7 +73,8 @@ router.post('/chat', async (req, res) => {
     const updated = db.prepare('SELECT * FROM contacts WHERE id = ?').get(fresh.id);
     const messages = db.prepare(`
       SELECT id, direction, author, content, content_type, created_at
-      FROM messages WHERE contact_id = ? ORDER BY created_at ASC
+      FROM messages WHERE contact_id = ?
+      ORDER BY created_at ASC, id ASC
     `).all(fresh.id);
 
     // Extrai os botões da última resposta (se houver) pro frontend renderizar
@@ -129,7 +130,8 @@ router.get('/sessions/:sessionId', (req, res) => {
 
   const messages = db.prepare(`
     SELECT id, direction, author, content, content_type, created_at
-    FROM messages WHERE contact_id = ? ORDER BY created_at ASC
+    FROM messages WHERE contact_id = ?
+    ORDER BY created_at ASC, id ASC
   `).all(contact.id);
 
   res.json({ contact, messages });
