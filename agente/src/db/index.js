@@ -32,6 +32,15 @@ export function runSchema() {
 
   safeAddColumn('contacts', 'campaign_source', 'TEXT');
   safeAddColumn('contacts', 'campaign_tags', 'TEXT');
+
+  // Tracking de versão/modelo/provider em mensagens outbound da IA.
+  // Permite cruzar feedback humano com a versão exata do prompt + modelo
+  // que gerou aquela resposta. Sem isso, todo feedback do mutirão fica
+  // desconectado da versão que produziu.
+  safeAddColumn('messages', 'cached_tokens', 'INTEGER DEFAULT 0');
+  safeAddColumn('messages', 'provider', 'TEXT');         // 'openai' | 'anthropic'
+  safeAddColumn('messages', 'model_used', 'TEXT');       // 'gpt-4.1-mini' | 'claude-sonnet-4-6'
+  safeAddColumn('messages', 'prompt_version', 'TEXT');   // SHA1[:10] do LILA_SYSTEM_PROMPT
 }
 
 // Garante schema na primeira importação

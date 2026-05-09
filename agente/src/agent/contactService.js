@@ -42,11 +42,20 @@ export function recordInbound(contactId, { content, content_type = 'text', ghl_m
 }
 
 export function recordOutbound(contactId, { author = 'ia', content, sdr_id = null, usage = {} }) {
-  const { tokens_in = 0, tokens_out = 0, cost_usd = 0 } = usage;
+  const {
+    tokens_in = 0,
+    tokens_out = 0,
+    cached_tokens = 0,
+    cost_usd = 0,
+    provider = null,
+    model = null,
+    prompt_version = null,
+  } = usage;
   db.prepare(`
-    INSERT INTO messages (contact_id, direction, author, sdr_id, content, tokens_in, tokens_out, cost_usd)
-    VALUES (?, 'outbound', ?, ?, ?, ?, ?, ?)
-  `).run(contactId, author, sdr_id, content, tokens_in, tokens_out, cost_usd);
+    INSERT INTO messages
+      (contact_id, direction, author, sdr_id, content, tokens_in, tokens_out, cached_tokens, cost_usd, provider, model_used, prompt_version)
+    VALUES (?, 'outbound', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(contactId, author, sdr_id, content, tokens_in, tokens_out, cached_tokens, cost_usd, provider, model, prompt_version);
   db.prepare('UPDATE contacts SET last_outbound_at = CURRENT_TIMESTAMP WHERE id = ?').run(contactId);
 }
 

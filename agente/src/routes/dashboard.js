@@ -273,4 +273,92 @@ router.get('/sdrs', (req, res) => {
   res.json({ users });
 });
 
+// === Custo da IA ao vivo — pra Paulo monitorar durante mutirão ===
+// Mostra: total hoje, última hora, top 5 conversas mais caras, breakdown
+// por provider e por versão de prompt. Refresh sugerido: 30s.
+router.get('/admin/cost-now', (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+
+  const today = db.prepare(`
+    SELECT
+      COALESCE(SUM(cost_usd), 0) as cost_usd,
+      COUNT(*) as messages,
+      COALESCE(SUM(tokens_in), 0) as tokens_in,
+      COALESCE(SUM(tokens_out), 0) as tokens_out,
+      COALESCE(SUM(cached_tokens), 0) as cached_tokens
+    FROM messages
+    WHERE author = 'ia' AND date(created_at) = date('now')
+  `).get();
+
+  const lastHour = db.prepare(`
+    SELECT
+      COALESCE(SUM(cost_usd), 0) as cost_usd,
+      COUNT(*) as messages,
+      COALESCE(AVG(cost_usd), 0) as avg_cost_per_msg
+    FROM messages
+    WHERE author = 'ia' AND created_at > datetime('now', '-1 hour')
+  `).get();
+
+  // Cache hit ratio: cached / total_in. Útil pra ver se o fix do prefix
+  // cache OpenAI tá realmente economizando.
+  const cacheRatio = today.tokens_in > 0
+    ? today.cached_tokens / today.tokens_in
+    : 0;
+
+  const topConversations = db.prepare(`
+    SELECT
+      m.contact_id,
+      c.name,
+      c.phone,
+      c.funnel,
+      COUNT(*) as msgs,
+      ROUND(SUM(m.cost_usd) * 10000) / 10000 as total_cost
+    FROM messages m
+    JOIN contacts c ON c.id = m.contact_id
+    WHERE m.author = 'ia'
+      AND date(m.created_at) = date('now')
+      AND c.ghl_contact_id NOT LIKE 'playground-%'
+    GROUP BY m.contact_id
+    ORDER BY total_cost DESC
+    LIMIT 5
+  `).all();
+
+  const byProvider = db.prepare(`
+    SELECT
+      COALESCE(provider, 'unknown') as provider,
+      COUNT(*) as messages,
+      ROUND(SUM(cost_usd) * 10000) / 10000 as cost_usd
+    FROM messages
+    WHERE author = 'ia' AND date(created_at) = date('now')
+    GROUP BY provider
+  `).all();
+
+  const byPromptVersion = db.prepare(`
+    SELECT
+      COALESCE(prompt_version, 'unversioned') as prompt_version,
+      COUNT(*) as messages,
+      ROUND(SUM(cost_usd) * 10000) / 10000 as cost_usd
+    FROM messages
+    WHERE author = 'ia' AND date(created_at) = date('now')
+    GROUP BY prompt_version
+    ORDER BY messages DESC
+  `).all();
+
+  res.json({
+    today: {
+      cost_usd: today.cost_usd,
+      messages: today.messages,
+      tokens_in: today.tokens_in,
+      tokens_out: today.tokens_out,
+      cached_tokens: today.cached_tokens,
+      cache_hit_ratio: cacheRatio,
+    },
+    lastHour,
+    topConversations,
+    byProvider,
+    byPromptVersion,
+    generatedAt: new Date().toISOString(),
+  });
+});
+
 export default router;

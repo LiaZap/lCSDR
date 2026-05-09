@@ -1,10 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { LILA_SYSTEM_PROMPT } from './systemPrompt.js';
+import { LILA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
 import { SERVICOS } from './knowledge.js';
 import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 
 const VALID_SERVICES = new Set(Object.keys(SERVICOS));
+const PROVIDER = 'anthropic';
+const MAX_HISTORY_TOKENS = Number(process.env.LLM_HISTORY_MAX_TOKENS || 8000);
 
 // timeout de 25s + 1 retry no SDK (mesma justificativa do lila-openai)
 const client = new Anthropic({
@@ -14,8 +16,15 @@ const client = new Anthropic({
 });
 const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
 
-// Custos aproximados Sonnet 4.6 — usado só pra dashboard admin
+// Custos Anthropic Sonnet 4.6 (todos por 1M tokens):
+// - input não-cacheado: $3
+// - cache write (criação): $3.75 (1.25x base) — só na primeira chamada
+// - cache read (hit):     $0.30 (10% base) — todas as subsequentes em ~5min
+// - output:               $15
+// Antes a gente somava cache_read no tokens_in e cobrava tudo a $3 — superestimava ~10x.
 const COST_IN_PER_MTOK = 3.0;
+const COST_CACHE_WRITE_PER_MTOK = 3.75;
+const COST_CACHE_READ_PER_MTOK = 0.30;
 const COST_OUT_PER_MTOK = 15.0;
 
 // Detecta nome "lixo" (números, vazio, padrões esquisitos do WhatsApp)
@@ -28,14 +37,39 @@ function sanitizeName(rawName) {
   return name;
 }
 
+function estimateTokens(text) {
+  return Math.ceil((text || '').length / 4);
+}
+
 function buildHistory(contactId, limit = 30) {
-  const rows = db.prepare(`
+  let rows = db.prepare(`
     SELECT direction, author, content, content_type, created_at
     FROM messages
     WHERE contact_id = ?
     ORDER BY created_at ASC, id ASC
     LIMIT ?
   `).all(contactId, limit);
+
+  // Cap defensivo: trunca histórico se passar do orçamento de tokens
+  let totalTokens = rows.reduce((s, m) => s + estimateTokens(m.content), 0);
+  if (totalTokens > MAX_HISTORY_TOKENS) {
+    const kept = [];
+    let cum = 0;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const t = estimateTokens(rows[i].content);
+      if (cum + t > MAX_HISTORY_TOKENS) break;
+      cum += t;
+      kept.unshift(rows[i]);
+    }
+    logger.warn(
+      { contactId, original: rows.length, kept: kept.length },
+      'history truncado por exceder MAX_HISTORY_TOKENS'
+    );
+    rows = [
+      { direction: 'inbound', author: 'lead', content: '[contexto anterior truncado por tamanho — segue só os últimos turnos]', content_type: 'text' },
+      ...kept,
+    ];
+  }
 
   const turns = [];
   for (const m of rows) {
@@ -91,9 +125,28 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
   const parsed = tryParseJSON(raw);
 
   const usage = resp.usage || {};
-  const tokens_in = (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0);
+  const non_cached = usage.input_tokens || 0;
+  const cache_read = usage.cache_read_input_tokens || 0;
+  const cache_write = usage.cache_creation_input_tokens || 0;
+  const tokens_in = non_cached + cache_read + cache_write;
   const tokens_out = usage.output_tokens || 0;
-  const cost_usd = (tokens_in / 1e6) * COST_IN_PER_MTOK + (tokens_out / 1e6) * COST_OUT_PER_MTOK;
+
+  // Custo correto separando cada bucket (antes cobrava tudo a $3/M)
+  const cost_usd =
+    (non_cached / 1e6) * COST_IN_PER_MTOK +
+    (cache_write / 1e6) * COST_CACHE_WRITE_PER_MTOK +
+    (cache_read / 1e6) * COST_CACHE_READ_PER_MTOK +
+    (tokens_out / 1e6) * COST_OUT_PER_MTOK;
+
+  const meta_usage = {
+    tokens_in,
+    tokens_out,
+    cached_tokens: cache_read,
+    cost_usd,
+    provider: PROVIDER,
+    model: MODEL,
+    prompt_version: PROMPT_VERSION,
+  };
 
   if (!parsed || (!parsed.reply && !parsed.split)) {
     logger.warn({ raw: raw.slice(0, 300) }, 'Lila devolveu JSON inválido, usando fallback');
@@ -106,7 +159,7 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
       qualification_score: 0,
       qualification_notes: '⚠ Lila falhou em gerar resposta válida',
       end_conversation: false,
-      usage: { tokens_in, tokens_out, cost_usd },
+      usage: meta_usage,
     };
   }
 
@@ -119,6 +172,6 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
     parsed.service_recommended = null;
   }
 
-  return { ...parsed, usage: { tokens_in, tokens_out, cost_usd } };
+  return { ...parsed, usage: meta_usage };
 }
 

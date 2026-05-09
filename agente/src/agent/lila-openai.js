@@ -11,12 +11,16 @@
 //   - Output:       $1.60 / 1M tokens   (~9.4x mais barato)
 
 import OpenAI from 'openai';
-import { LILA_SYSTEM_PROMPT } from './systemPrompt.js';
+import { LILA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
 import { SERVICOS } from './knowledge.js';
 import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 
 const VALID_SERVICES = new Set(Object.keys(SERVICOS));
+const PROVIDER = 'openai';
+// Cap defensivo: se a soma das mensagens passar disso, trunca pra evitar
+// 1 conversa de 25 turnos consumir 50% do budget do mutirão sozinha.
+const MAX_HISTORY_TOKENS = Number(process.env.LLM_HISTORY_MAX_TOKENS || 8000);
 
 // timeout de 25s + 1 retry no SDK. Sem isso, OpenAI degradada trava
 // o webhook handler por 60-120s (default do SDK), encadeando WAL e leads.
@@ -133,13 +137,40 @@ function sanitizeContactName(rawName) {
   return name;
 }
 
+// Estimativa grosseira de tokens (~4 chars/token em PT-BR)
+function estimateTokens(text) {
+  return Math.ceil((text || '').length / 4);
+}
+
 function buildHistory(contactId, limit = 30) {
-  const rows = db.prepare(`
+  let rows = db.prepare(`
     SELECT direction, author, content, content_type, created_at
     FROM messages WHERE contact_id = ?
     ORDER BY created_at ASC, id ASC
     LIMIT ?
   `).all(contactId, limit);
+
+  // Cap defensivo: mantém só as últimas mensagens que cabem no orçamento
+  // de tokens. Conversa muito longa fica truncada com aviso explícito.
+  let totalTokens = rows.reduce((s, m) => s + estimateTokens(m.content), 0);
+  if (totalTokens > MAX_HISTORY_TOKENS) {
+    const kept = [];
+    let cum = 0;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const t = estimateTokens(rows[i].content);
+      if (cum + t > MAX_HISTORY_TOKENS) break;
+      cum += t;
+      kept.unshift(rows[i]);
+    }
+    logger.warn(
+      { contactId, original: rows.length, kept: kept.length, tokens: cum },
+      'history truncado por exceder MAX_HISTORY_TOKENS'
+    );
+    rows = [
+      { direction: 'inbound', author: 'lead', content: '[contexto anterior truncado por tamanho — segue só os últimos turnos]', content_type: 'text' },
+      ...kept,
+    ];
+  }
 
   return rows.map(m => {
     const role = m.direction === 'inbound' ? 'user' : 'assistant';
@@ -166,12 +197,21 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
 - Última nota de qualificação: ${contact.qualification_notes || 'nenhuma'}
 `.trim();
 
+  // === CACHE-FRIENDLY ===
+  // `instructions` precisa ficar CONSTANTE pra OpenAI hit no prefix-cache
+  // (>1024 tokens). Antes, juntávamos `meta` (que muda a cada turno) ao
+  // `instructions`, invalidando o cache em TODA chamada — gastando ~3-4x
+  // mais. Agora `meta` vai como mensagem developer no início do `input`,
+  // e o LILA_SYSTEM_PROMPT permanece estável em `instructions`.
   let response;
   try {
     response = await client.responses.create({
       model: MODEL,
-      instructions: `${LILA_SYSTEM_PROMPT}\n\n${meta}`,
-      input: history,
+      instructions: LILA_SYSTEM_PROMPT,
+      input: [
+        { role: 'developer', content: meta },
+        ...history,
+      ],
       text: {
         format: {
           type: 'json_schema',
@@ -206,6 +246,18 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
     (non_cached / 1e6) * COST_IN_PER_MTOK +
     (tokens_out / 1e6) * COST_OUT_PER_MTOK;
 
+  // Metadados rastreáveis: gravados em messages.* pra cruzar feedback
+  // com versão exata do prompt + modelo que gerou a resposta.
+  const meta_usage = {
+    tokens_in,
+    tokens_out,
+    cached_tokens: cached,
+    cost_usd,
+    provider: PROVIDER,
+    model: MODEL,
+    prompt_version: PROMPT_VERSION,
+  };
+
   if (!parsed || (!parsed.reply && !(parsed.split && parsed.split.length))) {
     return {
       reply: 'Deixa eu te conectar com alguém aqui do time, [aguarde um instante].',
@@ -216,7 +268,7 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
       qualification_score: 0,
       qualification_notes: '⚠ JSON inválido OpenAI Responses',
       end_conversation: false,
-      usage: { tokens_in, tokens_out, cost_usd },
+      usage: meta_usage,
     };
   }
 
@@ -230,5 +282,5 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
     parsed.service_recommended = null;
   }
 
-  return { ...parsed, usage: { tokens_in, tokens_out, cost_usd } };
+  return { ...parsed, usage: meta_usage };
 }
