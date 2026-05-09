@@ -9,7 +9,6 @@ import { db } from '../src/db/index.js';
 const USERS = [
   // Admins LC
   { name: 'Lilian Cardoso', email: 'lilian@lcagencia.com.br',  password: 'LCagencia2026', role: 'admin' },
-  { name: 'Bruna',          email: 'bruna@lcagencia.com.br',   password: 'LCagencia2026', role: 'admin' },
 
   // Time comercial LC (testers do mutirão de sábado)
   { name: 'Gabriel',     email: 'gabriel@lcagencia.com.br',     password: 'LCagencia2026', role: 'sdr' },
