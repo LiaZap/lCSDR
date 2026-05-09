@@ -10,6 +10,7 @@ import { db } from '../src/db/index.js';
 const EXTRA_USERS = [
   { name: 'Bruna Menel', email: 'brunamenel@lcagencia.com.br', password: 'LCagencia2026', role: 'sdr' },
   { name: 'Neto',        email: 'neto@lcagencia.com.br',       password: 'LCagencia2026', role: 'sdr' },
+  { name: 'Nataly',      email: 'nataly@lcagencia.com.br',     password: 'LCagencia2026', role: 'sdr' },
 ];
 
 for (const u of EXTRA_USERS) {
