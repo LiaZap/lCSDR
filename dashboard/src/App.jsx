@@ -100,8 +100,8 @@ function Shell({ children }) {
 
           <div className="user">
             <div className="user-avatar">{initials}</div>
-            <div style={{ fontWeight: 600, color: 'var(--lc-white)' }}>{user.name}</div>
-            <div className="small muted" style={{ marginBottom: 8 }}>{user.email}</div>
+            <div style={{ fontWeight: 600, color: 'var(--lc-white)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.name}</div>
+            <div className="small muted" style={{ marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user.email}>{user.email}</div>
             <button className="ghost small" style={{ padding: '4px 8px', color: 'rgba(255,255,255,0.6)', alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6 }}
               onClick={() => { clearSession(); nav('/login'); }}>
               <Icon.Logout width={12} height={12} /> Sair

@@ -90,6 +90,7 @@ export default function Conversations() {
   }, [contacts]);
 
   async function send() {
+    if (sending) return; // double-submit guard
     if (!msg.trim() || !active) return;
     setSending(true);
     try {

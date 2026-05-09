@@ -145,6 +145,10 @@ router.post('/contacts/:id/feedback', (req, res) => {
     if (!valid.includes(verdict)) {
       return res.status(400).json({ error: `verdict precisa ser um de: ${valid.join(', ')}` });
     }
+    // Cap defensivo no comment — evita inserir blob gigante no banco
+    if (comment != null && (typeof comment !== 'string' || comment.length > 2000)) {
+      return res.status(400).json({ error: 'comentário muito longo (máx 2000 caracteres)' });
+    }
     const contact = db.prepare('SELECT id FROM contacts WHERE id = ?').get(req.params.id);
     if (!contact) return res.status(404).json({ error: 'contato não encontrado' });
 

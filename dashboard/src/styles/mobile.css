@@ -76,7 +76,7 @@
     top: 0;
     bottom: 0;
     width: 280px;
-    height: 100vh;
+    height: 100dvh;
     z-index: 100;
     transform: translateX(-100%);
     transition: transform 0.28s var(--ease-out);
@@ -136,7 +136,7 @@
   /* === Inbox: alterna entre lista e chat === */
   .inbox-shell {
     grid-template-columns: 1fr;
-    height: calc(100vh - 56px - 16px);
+    height: calc(100dvh - 56px - 16px);
     gap: 0;
   }
 
@@ -194,11 +194,21 @@
     flex-shrink: 0;
   }
 
-  /* Kanban: colunas mais estreitas mas ainda scroll horizontal */
-  .leads-kanban-shell { height: calc(100vh - 56px - 80px); gap: 12px; }
-  .kanban-board {
-    grid-template-columns: repeat(7, minmax(220px, 280px));
-    gap: 10px;
+  /* Kanban: drag-drop não funciona bem em touch + drawer.
+     Esconde o board e mostra aviso pra usar no desktop. */
+  .leads-kanban-shell .kanban-board { display: none; }
+  .leads-kanban-shell::after {
+    content: "Pipeline funciona melhor no desktop. No celular use Conversas pra avaliar leads.";
+    display: block;
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 14px;
+    background: var(--surface-card);
+    border: 1.5px dashed var(--border-soft);
+    border-radius: var(--radius-lg);
+    margin-top: 12px;
+    line-height: 1.5;
   }
 
   /* Login: o login.css já cobre 980px, mas garante padding */

@@ -12,8 +12,11 @@
 
 import OpenAI from 'openai';
 import { LILA_SYSTEM_PROMPT } from './systemPrompt.js';
+import { SERVICOS } from './knowledge.js';
 import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
+
+const VALID_SERVICES = new Set(Object.keys(SERVICOS));
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
@@ -209,6 +212,16 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
       end_conversation: false,
       usage: { tokens_in, tokens_out, cost_usd },
     };
+  }
+
+  // Defesa contra hallucination de serviço: se a Lila inventou uma chave,
+  // descarta pra não confirmar produto inexistente pro lead.
+  if (parsed.service_recommended && !VALID_SERVICES.has(parsed.service_recommended)) {
+    logger.warn(
+      { invented: parsed.service_recommended, valid: [...VALID_SERVICES] },
+      'Lila inventou serviço inexistente — descartando service_recommended'
+    );
+    parsed.service_recommended = null;
   }
 
   return { ...parsed, usage: { tokens_in, tokens_out, cost_usd } };

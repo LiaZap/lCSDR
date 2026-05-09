@@ -28,6 +28,7 @@ export default function LeadDetail() {
   const { contact, messages = [] } = data;
 
   async function send() {
+    if (sending) return; // double-submit guard (Ctrl+Enter mantido apertado)
     if (!msg.trim()) return;
     setSending(true);
     try {
@@ -68,7 +69,7 @@ export default function LeadDetail() {
             <div className="row">
               {contact.ai_paused
                 ? <span className="tag black">IA pausada · SDR no controle</span>
-                : <span className="tag orange">IA atendendo</span>}
+                : <span className="tag magenta">IA atendendo</span>}
             </div>
           </div>
 

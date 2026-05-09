@@ -23,7 +23,10 @@ export default function Overview() {
   const [days, setDays] = useState(7);
   const [data, setData] = useState(null);
   const user = getUser();
-  const seenWelcome = typeof window !== 'undefined' && localStorage.getItem('lc_welcome_seen') === '1';
+  // Estado local em vez de ler localStorage direto: permite fechar sem reload
+  const [seenWelcome, setSeenWelcome] = useState(
+    typeof window !== 'undefined' && localStorage.getItem('lc_welcome_seen') === '1'
+  );
 
   useEffect(() => {
     api.metrics(days).then(setData).catch(console.error);
@@ -65,7 +68,7 @@ export default function Overview() {
         <div className="card glow" style={{ borderLeft: '4px solid var(--lc-magenta)', position: 'relative' }}>
           <button
             className="ghost small"
-            onClick={() => { localStorage.setItem('lc_welcome_seen', '1'); window.location.reload(); }}
+            onClick={() => { localStorage.setItem('lc_welcome_seen', '1'); setSeenWelcome(true); }}
             style={{ position: 'absolute', top: 12, right: 14, padding: '2px 8px', fontSize: 18, color: 'var(--text-tertiary)' }}
             title="Fechar"
           >×</button>

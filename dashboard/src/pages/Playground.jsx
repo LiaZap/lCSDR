@@ -60,6 +60,7 @@ export default function Playground() {
   useEffect(() => { messagesRef.current?.scrollTo(0, 9e9); }, [messages.length]);
 
   async function send(textOverride) {
+    if (sending) return; // double-submit guard
     const text = (textOverride ?? msg).trim();
     if (!text || !sessionId) return;
     setSending(true);

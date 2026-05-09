@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS contacts (
 CREATE INDEX IF NOT EXISTS idx_contacts_stage ON contacts(stage);
 CREATE INDEX IF NOT EXISTS idx_contacts_funnel ON contacts(funnel);
 CREATE INDEX IF NOT EXISTS idx_contacts_sdr ON contacts(assigned_sdr_id);
+-- Índices adicionais pra queries do dashboard (filtro temporal + dedup webhook)
+CREATE INDEX IF NOT EXISTS idx_contacts_created ON contacts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
+CREATE INDEX IF NOT EXISTS idx_contacts_updated ON contacts(updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +51,8 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_contact ON messages(contact_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_ghl_id ON messages(ghl_message_id);
 
 CREATE TABLE IF NOT EXISTS sdr_users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

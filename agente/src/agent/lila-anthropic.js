@@ -1,7 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { LILA_SYSTEM_PROMPT } from './systemPrompt.js';
+import { SERVICOS } from './knowledge.js';
 import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
+
+const VALID_SERVICES = new Set(Object.keys(SERVICOS));
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
@@ -100,6 +103,15 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
       end_conversation: false,
       usage: { tokens_in, tokens_out, cost_usd },
     };
+  }
+
+  // Defesa contra hallucination de serviço (mesmo guard do lila-openai)
+  if (parsed.service_recommended && !VALID_SERVICES.has(parsed.service_recommended)) {
+    logger.warn(
+      { invented: parsed.service_recommended },
+      'Lila (Anthropic) inventou serviço inexistente — descartando'
+    );
+    parsed.service_recommended = null;
   }
 
   return { ...parsed, usage: { tokens_in, tokens_out, cost_usd } };
