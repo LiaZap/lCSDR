@@ -79,18 +79,16 @@ export const api = {
   },
   sdrs() { return request('/api/sdrs'); },
 
-  // === Feedback humano ===
-  feedback(id, verdict, comment) {
-    return request(`/api/contacts/${id}/feedback`, {
-      method: 'POST',
-      body: JSON.stringify({ verdict, comment }),
-    });
-  },
+  // === Feedback humano (single source of truth) ===
+  // (definição original em feedback() acima, na linha 61 — esta seção
+  // duplicata foi removida e substituída por aliases pra compat)
   feedbackList(verdict) {
     const qs = verdict ? `?verdict=${verdict}` : '';
     return request(`/api/feedback${qs}`);
   },
-  feedbackSummary() { return request('/api/feedback/summary'); },
+
+  // === Admin: custo da IA ao vivo (admin only no backend) ===
+  costNow() { return request('/api/admin/cost-now'); },
 
   // === Playground ===
   playground: {

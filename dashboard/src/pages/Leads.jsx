@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import {
   DndContext, DragOverlay, useSensor, useSensors, PointerSensor, KeyboardSensor,
   closestCorners, useDroppable,
@@ -87,7 +88,7 @@ export default function Leads() {
       console.error('falha ao mover stage:', err);
       // Reverter caso falhe
       setContacts(prev => prev.map(c => c.id === active.id ? { ...c, stage: contact.stage } : c));
-      alert('Falha ao mover lead. Recarregue a página.');
+      toast.error('Falha ao mover lead. Recarregue a página.');
     }
   }
 

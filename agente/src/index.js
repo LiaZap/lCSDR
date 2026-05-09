@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { logger } from './utils/logger.js';
 import webhookRoutes from './routes/webhook.js';
 import webhookUazapiRoutes from './routes/webhookUazapi.js';
@@ -23,7 +25,17 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 
 const app = express();
 
-// CORS: aceita lista CSV pra suportar múltiplas origens (prod + dev local)
+// Confia no proxy reverso da EasyPanel pra rate-limit pegar IP real
+app.set('trust proxy', 1);
+
+// === Helmet: cabeçalhos de segurança básicos ===
+// CSP customizado pode quebrar React inline scripts; usar default sem CSP.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+
+// === CORS com lista CSV (prod + dev local) ===
 const allowedOrigins = (process.env.DASHBOARD_ORIGIN || '*')
   .split(',')
   .map(o => o.trim())
@@ -39,6 +51,34 @@ app.use(cors({
 // Precisa do raw body pra validar assinatura HMAC do GHL.
 app.use(express.json({ limit: '2mb', verify: captureRawBody }));
 app.use(express.urlencoded({ extended: true }));
+
+// === Rate limiting ===
+// Login: brute-force protection. 10 tentativas/min por IP.
+const loginLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'muitas tentativas — aguarde 1 minuto' },
+});
+// Webhooks (uazapi/ghl): bursts são normais, limite alto. 600/min.
+const webhookLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+// API geral (/api/*): 200/min por IP. Conta dashboard + admin.
+const apiLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/auth/login', loginLimiter);
+app.use('/webhook', webhookLimiter);
+app.use('/api', apiLimiter);
 
 // Health check real: testa conexão com DB.
 // EasyPanel/UptimeRobot batem nesse endpoint pra detectar zumbi.

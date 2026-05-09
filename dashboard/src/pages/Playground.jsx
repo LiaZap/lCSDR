@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { api } from '../lib/api.js';
 
 // Playground: chat ao vivo com a Lila sem passar pelo GHL.
@@ -81,7 +82,7 @@ export default function Playground() {
       setLastResult(r);
       loadSessions();
     } catch (e) {
-      alert('Erro: ' + e.message);
+      toast.error(`Erro: ${e.message}`);
       setMessages(m => m.filter(x => x.id !== tempMsg.id));
     } finally {
       setSending(false);

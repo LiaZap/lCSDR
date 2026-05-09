@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../lib/api.js';
+import { toast } from 'sonner';
+import { api, getUser } from '../lib/api.js';
 import { Icon } from '../components/Icon.jsx';
 
 const FILTERS = [
@@ -31,22 +32,31 @@ export default function Conversations() {
   const [msg, setMsg] = useState('');
   const [sending, setSending] = useState(false);
   const messagesRef = useRef(null);
+  const listRef = useRef(null);
   const nav = useNavigate();
 
-  async function loadList() {
-    setLoading(true);
+  async function loadList({ silent = false } = {}) {
+    if (!silent) setLoading(true);
     try {
       const r = await api.contacts({ limit: 200 });
       const order = { qualificado: 0, handoff: 1, qualificando: 2, pre_qualificando: 3, novo: 4, agendado: 5, desqualificado: 6 };
       const rows = (r.contacts || []).sort((a, b) => (order[a.stage] ?? 9) - (order[b.stage] ?? 9));
+      // Preserva scroll position da lista durante reload (silent reload tipo polling)
+      const prevScroll = listRef.current?.scrollTop;
       setContacts(rows);
+      // Restaura scroll no próximo tick (depois do re-render)
+      if (silent && prevScroll != null) {
+        requestAnimationFrame(() => {
+          if (listRef.current) listRef.current.scrollTop = prevScroll;
+        });
+      }
       // Forma funcional: só define o primeiro como ativo SE não tiver nenhum.
       // Senão (já tem ativo, mesmo que mudou pelo clique do usuário), preserva.
       // Importante: usar callback evita stale closure no setInterval.
       if (rows.length > 0) {
         setActive(prev => prev ?? rows[0].id);
       }
-    } finally { setLoading(false); }
+    } finally { if (!silent) setLoading(false); }
   }
 
   async function loadDetail(id) {
@@ -57,12 +67,11 @@ export default function Conversations() {
     } catch (e) { console.error(e); }
   }
 
-  // Carrega lista inicial e refaz a cada 15s.
-  // IMPORTANTE: deps vazias propositalmente — o polling é independente do clique.
-  // O fix do "volta pra primeira" foi feito em loadList usando setActive(prev => prev ?? ...).
+  // Carrega lista inicial e refaz a cada 15s (silencioso — sem flicker).
+  // deps vazias propositalmente: polling é independente do clique do usuário.
   useEffect(() => {
     loadList();
-    const t = setInterval(loadList, 15000);
+    const t = setInterval(() => loadList({ silent: true }), 15000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -96,8 +105,9 @@ export default function Conversations() {
     try {
       await api.send(active, msg.trim());
       setMsg('');
+      toast.success('Mensagem enviada');
       await loadDetail(active);
-    } catch (e) { alert(e.message); }
+    } catch (e) { toast.error(`Falha ao enviar: ${e.message}`); }
     finally { setSending(false); }
   }
 
@@ -137,7 +147,7 @@ export default function Conversations() {
           </div>
         </div>
 
-        <div className="inbox-list-body">
+        <div className="inbox-list-body" ref={listRef}>
           {loading && filtered.length === 0 && (
             <>
               {[1, 2, 3, 4].map(i => <div key={i} className="skeleton" style={{ height: 64, marginBottom: 1 }} />)}
@@ -324,17 +334,57 @@ function Row({ label, value, tag, score }) {
 function FeedbackBox({ contactId, feedbacks, reload }) {
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
+  // Lista local com optimistic update — incluí o feedback recém-enviado
+  // antes do reload do servidor pra mostrar imediato pra equipe LC.
+  const [optimistic, setOptimistic] = useState([]);
+  // Flag pra mostrar "✓ Salvo" por 1.5s
+  const [justSaved, setJustSaved] = useState(false);
+  const user = getUser();
+
   async function send(verdict) {
+    if (saving) return;
     setSaving(true);
+    const cmt = comment.trim() || null;
+    // Optimistic: adiciona já à lista local
+    const optimisticFb = {
+      id: `opt-${Date.now()}`,
+      verdict,
+      comment: cmt,
+      reviewer_name: user?.name || 'Você',
+      created_at: new Date().toISOString(),
+      _optimistic: true,
+    };
+    setOptimistic(prev => [optimisticFb, ...prev]);
+    setComment('');
     try {
-      await api.feedback(contactId, verdict, comment.trim() || null);
-      setComment('');
+      await api.feedback(contactId, verdict, cmt);
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 1500);
+      toast.success('Avaliação registrada');
       reload();
-    } catch (e) { alert(e.message); } finally { setSaving(false); }
+      // Limpa optimistic depois do reload (servidor agora tem o real)
+      setTimeout(() => setOptimistic(prev => prev.filter(o => o.id !== optimisticFb.id)), 800);
+    } catch (e) {
+      // Rollback do optimistic
+      setOptimistic(prev => prev.filter(o => o.id !== optimisticFb.id));
+      setComment(cmt || '');
+      toast.error(`Falha ao salvar: ${e.message}`);
+    } finally { setSaving(false); }
   }
+
+  // Mescla optimistic + servidor (optimistic em cima, sem duplicar)
+  const allFeedbacks = [...optimistic, ...feedbacks];
+
   return (
     <div className="card" style={{ borderTop: '3px solid var(--lc-magenta)', padding: 16 }}>
-      <h3 style={{ fontSize: 14 }}>Avalie o tom da Lila</h3>
+      <h3 style={{ fontSize: 14 }}>
+        Avalie o tom da Lila
+        {justSaved && (
+          <span style={{ marginLeft: 8, color: 'var(--lc-success)', fontSize: 12, fontWeight: 500 }}>
+            ✓ Salvo
+          </span>
+        )}
+      </h3>
       <div className="small muted" style={{ marginTop: 4 }}>Esse feedback alimenta refinamento do prompt.</div>
       <textarea
         placeholder="Comentário (opcional)…"
@@ -348,13 +398,14 @@ function FeedbackBox({ contactId, feedbacks, reload }) {
         <button onClick={() => send('tom_errado')} disabled={saving} style={{ flex: 1, fontSize: 12, padding: '6px 8px' }}>👎 Errado</button>
         <button onClick={() => send('corrigir')} disabled={saving || !comment.trim()} style={{ flex: 1, fontSize: 12, padding: '6px 8px' }}>💬</button>
       </div>
-      {feedbacks.length > 0 && (
+      {allFeedbacks.length > 0 && (
         <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-soft)', fontSize: 11 }}>
-          <div className="small muted" style={{ marginBottom: 6 }}>{feedbacks.length} avaliação{feedbacks.length > 1 ? 'ões' : ''}</div>
-          {feedbacks.slice(0, 3).map(f => (
-            <div key={f.id} style={{ marginBottom: 6 }}>
+          <div className="small muted" style={{ marginBottom: 6 }}>{allFeedbacks.length} avaliação{allFeedbacks.length > 1 ? 'ões' : ''}</div>
+          {allFeedbacks.slice(0, 3).map(f => (
+            <div key={f.id} style={{ marginBottom: 6, opacity: f._optimistic ? 0.7 : 1 }}>
               <span className="tag" style={{ fontSize: 10, padding: '1px 6px' }}>
                 {f.verdict === 'tom_ok' ? '👍' : f.verdict === 'tom_errado' ? '👎' : '💬'} {f.reviewer_name}
+                {f._optimistic && ' · enviando…'}
               </span>
               {f.comment && <div style={{ paddingLeft: 6, color: 'var(--text-secondary)', marginTop: 2 }}>{f.comment}</div>}
             </div>

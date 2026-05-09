@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { api } from '../lib/api.js';
+import { toast } from 'sonner';
+import { api, getUser } from '../lib/api.js';
 
 export default function LeadDetail() {
   const { id } = useParams();
@@ -8,6 +9,11 @@ export default function LeadDetail() {
   const [msg, setMsg] = useState('');
   const [sending, setSending] = useState(false);
   const messagesRef = useRef(null);
+  // Refs lidos pelo poll pra evitar interromper digitação
+  const msgRef = useRef('');
+  const sendingRef = useRef(false);
+  msgRef.current = msg;
+  sendingRef.current = sending;
 
   async function load() {
     const r = await api.contact(id);
@@ -16,7 +22,14 @@ export default function LeadDetail() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 5000);
+    // Polling: 15s (era 5s — agressivo demais e interrompia digitação).
+    // Skipa se o usuário está enviando ou digitando — evita re-render no
+    // meio da composição.
+    const t = setInterval(() => {
+      if (sendingRef.current) return;
+      if (msgRef.current && msgRef.current.length > 0) return;
+      load();
+    }, 15000);
     return () => clearInterval(t);
   }, [id]);
 
@@ -34,13 +47,20 @@ export default function LeadDetail() {
     try {
       await api.send(id, msg.trim());
       setMsg('');
+      toast.success('Mensagem enviada');
       await load();
-    } catch (e) { alert(e.message); }
+    } catch (e) { toast.error(`Falha: ${e.message}`); }
     finally { setSending(false); }
   }
 
-  async function assume() { await api.assume(id); load(); }
-  async function release() { await api.release(id); load(); }
+  async function assume() {
+    try { await api.assume(id); toast.success('Você assumiu o atendimento'); load(); }
+    catch (e) { toast.error(`Falha: ${e.message}`); }
+  }
+  async function release() {
+    try { await api.release(id); toast.success('Devolvido pra IA'); load(); }
+    catch (e) { toast.error(`Falha: ${e.message}`); }
+  }
 
   return (
     <div className="col">
@@ -139,15 +159,35 @@ export default function LeadDetail() {
 function FeedbackCard({ contactId, feedbacks, reload }) {
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
+  const [optimistic, setOptimistic] = useState([]);
+  const [justSaved, setJustSaved] = useState(false);
+  const user = getUser();
 
   async function send(verdict) {
+    if (saving) return;
     setSaving(true);
+    const cmt = comment.trim() || null;
+    const optimisticFb = {
+      id: `opt-${Date.now()}`,
+      verdict,
+      comment: cmt,
+      reviewer_name: user?.name || 'Você',
+      created_at: new Date().toISOString(),
+      _optimistic: true,
+    };
+    setOptimistic(prev => [optimisticFb, ...prev]);
+    setComment('');
     try {
-      await api.feedback(contactId, verdict, comment.trim() || null);
-      setComment('');
+      await api.feedback(contactId, verdict, cmt);
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 1500);
+      toast.success('Avaliação registrada');
       reload();
+      setTimeout(() => setOptimistic(prev => prev.filter(o => o.id !== optimisticFb.id)), 800);
     } catch (e) {
-      alert('Erro: ' + e.message);
+      setOptimistic(prev => prev.filter(o => o.id !== optimisticFb.id));
+      setComment(cmt || '');
+      toast.error(`Erro: ${e.message}`);
     } finally {
       setSaving(false);
     }
@@ -159,9 +199,18 @@ function FeedbackCard({ contactId, feedbacks, reload }) {
     corrigir: { icon: '💬', label: 'Corrige isso', cls: 'magenta' },
   };
 
+  const allFeedbacks = [...optimistic, ...feedbacks];
+
   return (
     <div className="card" style={{ borderTop: '3px solid var(--lc-magenta)' }}>
-      <h3>Avalie o tom da Lila</h3>
+      <h3>
+        Avalie o tom da Lila
+        {justSaved && (
+          <span style={{ marginLeft: 8, color: 'var(--lc-success)', fontSize: 13, fontWeight: 500 }}>
+            ✓ Salvo
+          </span>
+        )}
+      </h3>
       <div className="small muted" style={{ marginTop: 6 }}>
         Esse feedback alimenta refinamento contínuo do prompt.
       </div>
@@ -186,15 +235,18 @@ function FeedbackCard({ contactId, feedbacks, reload }) {
         </button>
       </div>
 
-      {feedbacks.length > 0 && (
+      {allFeedbacks.length > 0 && (
         <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--lc-line)' }}>
-          <div className="small muted" style={{ marginBottom: 8 }}>Histórico ({feedbacks.length})</div>
-          {feedbacks.slice(0, 5).map(f => {
+          <div className="small muted" style={{ marginBottom: 8 }}>Histórico ({allFeedbacks.length})</div>
+          {allFeedbacks.slice(0, 5).map(f => {
             const it = labelMap[f.verdict] || { icon: '?', label: f.verdict, cls: '' };
             return (
-              <div key={f.id} style={{ marginBottom: 8, fontSize: 12 }}>
+              <div key={f.id} style={{ marginBottom: 8, fontSize: 12, opacity: f._optimistic ? 0.7 : 1 }}>
                 <span className={`tag ${it.cls}`}>{it.icon} {it.label}</span>
-                {' '}<span className="muted">— {f.reviewer_name}, {new Date(f.created_at).toLocaleString('pt-BR')}</span>
+                {' '}<span className="muted">
+                  — {f.reviewer_name}
+                  {f._optimistic ? ' · enviando…' : `, ${new Date(f.created_at).toLocaleString('pt-BR')}`}
+                </span>
                 {f.comment && (
                   <div style={{ marginTop: 4, paddingLeft: 8, borderLeft: '2px solid var(--lc-line)' }}>{f.comment}</div>
                 )}
