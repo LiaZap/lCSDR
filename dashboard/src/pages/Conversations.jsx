@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { Icon } from '../components/Icon.jsx';
 
 const FILTERS = [
   { id: 'pending', label: 'A revisar', filter: c => !c.feedback_count || c.feedback_count === 0 },
@@ -23,6 +24,7 @@ export default function Conversations() {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState(null);
+  const [mobileView, setMobileView] = useState('list'); // 'list' | 'chat' — só afeta mobile
   const [filter, setFilter] = useState('pending');
   const [search, setSearch] = useState('');
   const [data, setData] = useState(null);
@@ -105,7 +107,7 @@ export default function Conversations() {
   const messages = data?.messages || [];
 
   return (
-    <div className="inbox-shell">
+    <div className={`inbox-shell view-${mobileView}`}>
       {/* === Coluna 1: Lista === */}
       <aside className="inbox-list">
         <div className="inbox-list-head">
@@ -146,7 +148,12 @@ export default function Conversations() {
             </div>
           )}
           {filtered.map(c => (
-            <ChatListItem key={c.id} contact={c} active={c.id === active} onClick={() => setActive(c.id)} />
+            <ChatListItem
+              key={c.id}
+              contact={c}
+              active={c.id === active}
+              onClick={() => { setActive(c.id); setMobileView('chat'); }}
+            />
           ))}
         </div>
       </aside>
@@ -165,6 +172,13 @@ export default function Conversations() {
           <>
             <div className="inbox-chat-head">
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button
+                  className="mobile-back-btn"
+                  onClick={() => setMobileView('list')}
+                  aria-label="Voltar para lista"
+                >
+                  <Icon.ArrowLeft width={18} height={18} />
+                </button>
                 <div className="lead-avatar" style={{ width: 40, height: 40, fontSize: 14 }}>
                   {(contact.name || '?').split(' ').map(s => s[0]).slice(0, 2).join('')}
                 </div>

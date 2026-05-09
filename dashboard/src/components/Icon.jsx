@@ -87,6 +87,19 @@ export const Icon = {
       <line x1="21" y1="12" x2="9" y2="12" />
     </svg>
   ),
+  Menu: (props) => (
+    <svg {...base} {...props}>
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  ),
+  ArrowLeft: (props) => (
+    <svg {...base} {...props}>
+      <line x1="19" y1="12" x2="5" y2="12" />
+      <polyline points="12 19 5 12 12 5" />
+    </svg>
+  ),
 };
 
 export default Icon;

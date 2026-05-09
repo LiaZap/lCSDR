@@ -8,6 +8,7 @@ import './styles/layout.css';
 import './styles/login.css';
 import './styles/kanban.css';
 import './styles/inbox.css';
+import './styles/mobile.css';
 
 initTheme();
 
