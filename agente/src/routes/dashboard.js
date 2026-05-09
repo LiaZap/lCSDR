@@ -97,7 +97,8 @@ router.get('/contacts', (req, res) => {
   if (q) { where.push('(c.name LIKE ? OR c.phone LIKE ? OR c.email LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
 
   const sql = `
-    SELECT c.*, u.name as sdr_name
+    SELECT c.*, u.name as sdr_name,
+      (SELECT COUNT(*) FROM conversation_feedback WHERE contact_id = c.id) as feedback_count
     FROM contacts c
     LEFT JOIN sdr_users u ON u.id = c.assigned_sdr_id
     WHERE ${where.join(' AND ')}

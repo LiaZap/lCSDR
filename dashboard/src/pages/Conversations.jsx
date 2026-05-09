@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 
 const FILTERS = [
+  { id: 'pending', label: 'A revisar', filter: c => !c.feedback_count || c.feedback_count === 0 },
+  { id: 'reviewed', label: 'Já avaliadas', filter: c => c.feedback_count > 0 },
   { id: 'all', label: 'Todas', filter: () => true },
   { id: 'qualified', label: 'Qualificados', filter: c => c.stage === 'qualificado' || c.stage === 'handoff' },
   { id: 'in_progress', label: 'Em atendimento', filter: c => ['qualificando', 'pre_qualificando', 'novo'].includes(c.stage) },
@@ -21,7 +23,7 @@ export default function Conversations() {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState(null);
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState('pending');
   const [search, setSearch] = useState('');
   const [data, setData] = useState(null);
   const [msg, setMsg] = useState('');
@@ -240,6 +242,7 @@ function ChatListItem({ contact, active, onClick }) {
   const initials = (contact.name || '?').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase();
   const lastTime = contact.last_inbound_at || contact.updated_at;
   const isAI = !contact.ai_paused;
+  const hasFeedback = contact.feedback_count > 0;
 
   return (
     <div className={`chat-list-item ${active ? 'active' : ''}`} onClick={onClick}>
@@ -269,6 +272,11 @@ function ChatListItem({ contact, active, onClick }) {
           </span>
           {contact.qualification_score > 50 && (
             <span className="tag success" style={{ fontSize: 10, padding: '1px 6px' }}>★ {contact.qualification_score}</span>
+          )}
+          {hasFeedback && (
+            <span className="tag" style={{ fontSize: 10, padding: '1px 6px', background: 'var(--lc-success-bg)', color: 'var(--lc-success)' }} title={`${contact.feedback_count} avaliação(ões)`}>
+              ✓ avaliada
+            </span>
           )}
         </div>
         <div className="small muted" style={{ marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
