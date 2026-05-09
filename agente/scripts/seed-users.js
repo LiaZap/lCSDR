@@ -17,7 +17,7 @@ const USERS = [
   { name: 'Bruna Menel', email: 'brunamenel@lcagencia.com.br',  password: 'LCagencia2026', role: 'sdr' },
   { name: 'Neto',        email: 'neto@lcagencia.com.br',        password: 'LCagencia2026', role: 'sdr' },
   { name: 'Nataly',      email: 'nataly@lcagencia.com.br',      password: 'LCagencia2026', role: 'sdr' },
-  { name: 'Vítor',       email: 'vitor@lcagencia.com.br',       password: 'LCagencia2026', role: 'closer' },
+  { name: 'Victor',      email: 'victor@lcagencia.com.br',      password: 'LCagencia2026', role: 'closer' },
   { name: 'Isabella',    email: 'isabella@lcagencia.com.br',    password: 'LCagencia2026', role: 'admin' },
 
   // BEP (executor do projeto)
