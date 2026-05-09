@@ -139,20 +139,49 @@ router.get('/contacts/:id', (req, res) => {
 // === Feedback humano sobre uma conversa ===
 // POST /api/contacts/:id/feedback  body: { verdict, comment }
 router.post('/contacts/:id/feedback', (req, res) => {
-  const { verdict, comment } = req.body || {};
-  const valid = ['tom_ok', 'tom_errado', 'corrigir'];
-  if (!valid.includes(verdict)) {
-    return res.status(400).json({ error: `verdict precisa ser um de: ${valid.join(', ')}` });
+  try {
+    const { verdict, comment } = req.body || {};
+    const valid = ['tom_ok', 'tom_errado', 'corrigir'];
+    if (!valid.includes(verdict)) {
+      return res.status(400).json({ error: `verdict precisa ser um de: ${valid.join(', ')}` });
+    }
+    const contact = db.prepare('SELECT id FROM contacts WHERE id = ?').get(req.params.id);
+    if (!contact) return res.status(404).json({ error: 'contato não encontrado' });
+
+    // Verifica se o reviewer ainda existe no banco. Se o token JWT foi gerado
+    // antes de um restore/reseed, o req.user.id pode apontar pra ID que não
+    // existe mais. Nesse caso, busca pelo email (estável entre reseeds).
+    let reviewerId = req.user?.id;
+    if (reviewerId) {
+      const exists = db.prepare('SELECT id FROM sdr_users WHERE id = ?').get(reviewerId);
+      if (!exists && req.user?.email) {
+        // Fallback: tenta achar pelo email
+        const byEmail = db.prepare('SELECT id FROM sdr_users WHERE email = ?').get(req.user.email);
+        if (byEmail) reviewerId = byEmail.id;
+        else {
+          return res.status(401).json({
+            error: 'sessão expirada — faça logout e login novamente',
+            code: 'STALE_TOKEN',
+          });
+        }
+      }
+    }
+
+    if (!reviewerId) {
+      return res.status(401).json({ error: 'usuário não identificado, faça login novamente' });
+    }
+
+    const info = db.prepare(`
+      INSERT INTO conversation_feedback (contact_id, reviewer_id, verdict, comment)
+      VALUES (?, ?, ?, ?)
+    `).run(req.params.id, reviewerId, verdict, comment || null);
+
+    res.json({ ok: true, id: info.lastInsertRowid });
+  } catch (err) {
+    // Logger pra investigar se acontecer de novo (em vez de "erro interno" genérico)
+    console.error('[feedback] erro:', err.message, 'user:', req.user?.email, 'contact:', req.params.id);
+    res.status(500).json({ error: err.message || 'erro ao salvar feedback' });
   }
-  const contact = db.prepare('SELECT id FROM contacts WHERE id = ?').get(req.params.id);
-  if (!contact) return res.status(404).json({ error: 'contato não encontrado' });
-
-  const info = db.prepare(`
-    INSERT INTO conversation_feedback (contact_id, reviewer_id, verdict, comment)
-    VALUES (?, ?, ?, ?)
-  `).run(req.params.id, req.user.id, verdict, comment || null);
-
-  res.json({ ok: true, id: info.lastInsertRowid });
 });
 
 // === Lista todos os feedbacks (vira input pro refinamento de prompt) ===
