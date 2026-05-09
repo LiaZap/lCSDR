@@ -78,23 +78,76 @@ function sanitizeResult(result) {
   return result;
 }
 
+// Erro do provider é "retryable" se for: timeout, rate limit, ou 5xx do servidor.
+// Se for 4xx (auth, bad request, etc), NÃO faz fallback — é bug nosso.
+function isRetryableLlmError(err) {
+  if (!err) return false;
+  const status = err.status || err.statusCode;
+  if (status >= 500) return true;
+  if (status === 408 || status === 429) return true;
+  if (/timeout|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i.test(err.message || '')) return true;
+  return false;
+}
+
+function callProvider(name, args) {
+  return name === 'openai'
+    ? generateLilaReplyOpenAI(args)
+    : generateLilaReplyAnthropic(args);
+}
+
+function hasProviderKey(name) {
+  if (name === 'openai') return !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 30);
+  return !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.length > 30);
+}
+
 export async function generateLilaReply({ contact, incomingText }) {
-  const provider = llmProvider();
+  const primary = llmProvider();
+  const secondary = primary === 'openai' ? 'anthropic' : 'openai';
+
   if (!warnedProvider) {
     logger.info({
-      provider,
-      model: provider === 'openai'
+      provider: primary,
+      model: primary === 'openai'
         ? (process.env.OPENAI_MODEL || 'gpt-4.1-mini')
         : (process.env.CLAUDE_MODEL || 'claude-sonnet-4-6'),
+      fallbackAvailable: hasProviderKey(secondary),
     }, 'LLM provider ativo');
     warnedProvider = true;
   }
 
-  const raw = provider === 'openai'
-    ? await generateLilaReplyOpenAI({ contact, incomingText })
-    : await generateLilaReplyAnthropic({ contact, incomingText });
+  try {
+    const raw = await callProvider(primary, { contact, incomingText });
+    return sanitizeResult(raw);
+  } catch (err) {
+    // Tenta fallback se: erro retryable + fallback configurado + chaves diferentes
+    if (isRetryableLlmError(err) && hasProviderKey(secondary)) {
+      logger.warn({ primary, secondary, err: err.message, status: err.status },
+        'LLM primário falhou, tentando fallback no outro provider');
+      try {
+        const raw = await callProvider(secondary, { contact, incomingText });
+        return sanitizeResult(raw);
+      } catch (err2) {
+        logger.error({ err2: err2.message, status: err2.status },
+          'LLM fallback também falhou — devolvendo handoff de emergência');
+      }
+    } else {
+      logger.error({ err: err.message, status: err.status },
+        'LLM erro não-retryable ou sem fallback configurado');
+    }
 
-  return sanitizeResult(raw);
+    // Hardcoded fallback final: handoff pra humano. Não trava o lead esperando.
+    return sanitizeResult({
+      reply: 'Deixa eu te conectar com alguém aqui do time, [aguarde um instante].',
+      funnel: null,
+      stage: 'pre_qualificando',
+      handoff: true,
+      handoff_reason: `IA indisponível (${primary}${hasProviderKey(secondary) ? ' + fallback' : ''}): ${err.message}`,
+      qualification_score: 0,
+      qualification_notes: '⚠ Ambos LLMs falharam — encaminhando ao humano',
+      end_conversation: false,
+      usage: { tokens_in: 0, tokens_out: 0, cost_usd: 0 },
+    });
+  }
 }
 
 // Alias pra compatibilidade

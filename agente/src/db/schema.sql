@@ -112,6 +112,16 @@ CREATE TABLE IF NOT EXISTS conversation_feedback (
 CREATE INDEX IF NOT EXISTS idx_feedback_contact ON conversation_feedback(contact_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_verdict ON conversation_feedback(verdict);
 
+-- Dedup de webhooks (uazapi reentrega sem ack confiável → não pode processar 2x)
+CREATE TABLE IF NOT EXISTS processed_webhook_ids (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT NOT NULL,                 -- 'uazapi' | 'ghl' etc
+  message_id TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_processed_webhook_created ON processed_webhook_ids(created_at);
+
 -- Métricas diárias pré-agregadas (opcional, útil pro dashboard)
 CREATE TABLE IF NOT EXISTS daily_metrics (
   day TEXT PRIMARY KEY,           -- YYYY-MM-DD

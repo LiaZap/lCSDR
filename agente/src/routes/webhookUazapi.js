@@ -11,8 +11,19 @@ import {
   pauseIA, scheduleFollowup,
   markQualifiedAndHandoff, markDisqualified,
 } from '../agent/handoff.js';
+import { withContactLock } from '../utils/contactLock.js';
 
 const router = express.Router();
+
+// Idempotência: registra message_id processado e retorna true se já tinha sido
+// processado antes. uazapi reentrega webhooks sem ack confiável.
+function alreadyProcessed(source, messageId) {
+  if (!messageId) return false;
+  const result = db.prepare(
+    'INSERT OR IGNORE INTO processed_webhook_ids (source, message_id) VALUES (?, ?)'
+  ).run(source, String(messageId));
+  return result.changes === 0; // 0 = duplicata (UNIQUE bateu)
+}
 const MAX_KB = Number(process.env.MAX_ATTACHMENT_KB || 200);
 const MAX_MSGS_DAY = Number(process.env.MAX_MESSAGES_PER_CONVERSATION_PER_DAY || 40);
 
@@ -101,6 +112,12 @@ router.post('/uazapi', async (req, res) => {
 
     if (!isMessageEvent) {
       logger.warn({ eventType }, 'evento uazapi não é mensagem, ignorando');
+      return;
+    }
+
+    // Dedup: se uazapi reentregar o mesmo message.id, ignora.
+    if (alreadyProcessed('uazapi', msg.id)) {
+      logger.info({ messageId: msg.id }, 'webhook uazapi: mensagem duplicada (já processada), ignorando');
       return;
     }
 
@@ -378,56 +395,64 @@ async function handleInbound(event) {
 
   recordInbound(contact.id, { content, content_type, attachment_url });
 
-  // Se IA pausada → não responde
-  const fresh = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id);
-  if (fresh.ai_paused) {
-    logger.info({ contactId: fresh.id }, 'IA pausada (SDR no controle), só registrando');
-    scheduleFollowup(contact.id, 'silencio_sdr');
-    return;
-  }
+  // === Lock por contato ===
+  // Serializa LLM call + send + update por contactId. Sem isso, 2 mensagens
+  // do mesmo lead em <1s rodam 2 chamadas LLM paralelas que leem o mesmo
+  // histórico e respondem coisas conflitantes.
+  await withContactLock(contact.id, async () => {
+    // Re-lê o estado fresh DENTRO do lock (pode ter mudado enquanto esperava)
+    const fresh = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id);
+    if (!fresh) return;
 
-  if (countMessagesToday(contact.id) > MAX_MSGS_DAY) {
-    logger.warn({ contactId: contact.id }, 'limite diário atingido, pausando IA');
-    pauseIA(contact.id, 'limite_mensagens_dia');
-    return;
-  }
+    if (fresh.ai_paused) {
+      logger.info({ contactId: fresh.id }, 'IA pausada (SDR no controle), só registrando');
+      scheduleFollowup(contact.id, 'silencio_sdr');
+      return;
+    }
 
-  // Gera resposta
-  const result = await generateLilaReply({ contact: fresh, incomingText: content });
+    if (countMessagesToday(contact.id) > MAX_MSGS_DAY) {
+      logger.warn({ contactId: contact.id }, 'limite diário atingido, pausando IA');
+      pauseIA(contact.id, 'limite_mensagens_dia');
+      return;
+    }
 
-  const items = result.split && result.split.length ? result.split : [result.reply];
-  await sendSequence(fresh, items);
-  for (const item of items) {
-    const txt = typeof item === 'string' ? item : (item?.text || '');
-    if (txt) recordOutbound(fresh.id, { author: 'ia', content: txt, usage: result.usage });
-  }
+    // Gera resposta
+    const result = await generateLilaReply({ contact: fresh, incomingText: content });
 
-  // Atualiza estado
-  if (result.funnel || result.stage) {
-    db.prepare(`
-      UPDATE contacts
-      SET funnel = COALESCE(?, funnel),
-          stage = COALESCE(?, stage),
-          qualification_score = ?,
-          qualification_notes = COALESCE(?, qualification_notes),
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(
-      result.funnel || null,
-      result.stage || null,
-      result.qualification_score || fresh.qualification_score || 0,
-      result.qualification_notes || null,
-      fresh.id
-    );
-  }
+    const items = result.split && result.split.length ? result.split : [result.reply];
+    await sendSequence(fresh, items);
+    for (const item of items) {
+      const txt = typeof item === 'string' ? item : (item?.text || '');
+      if (txt) recordOutbound(fresh.id, { author: 'ia', content: txt, usage: result.usage });
+    }
 
-  if (result.handoff || result.stage === 'qualificado') {
-    await markQualifiedAndHandoff(fresh, result);
-  } else if (result.stage === 'desqualificado' || result.end_conversation) {
-    await markDisqualified(fresh, result);
-  } else {
-    scheduleFollowup(fresh.id, 'silencio_lead');
-  }
+    // Atualiza estado
+    if (result.funnel || result.stage) {
+      db.prepare(`
+        UPDATE contacts
+        SET funnel = COALESCE(?, funnel),
+            stage = COALESCE(?, stage),
+            qualification_score = ?,
+            qualification_notes = COALESCE(?, qualification_notes),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        result.funnel || null,
+        result.stage || null,
+        result.qualification_score || fresh.qualification_score || 0,
+        result.qualification_notes || null,
+        fresh.id
+      );
+    }
+
+    if (result.handoff || result.stage === 'qualificado') {
+      await markQualifiedAndHandoff(fresh, result);
+    } else if (result.stage === 'desqualificado' || result.end_conversation) {
+      await markDisqualified(fresh, result);
+    } else {
+      scheduleFollowup(fresh.id, 'silencio_lead');
+    }
+  });
 }
 
 export default router;

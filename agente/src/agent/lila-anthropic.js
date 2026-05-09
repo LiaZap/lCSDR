@@ -6,7 +6,12 @@ import { logger } from '../utils/logger.js';
 
 const VALID_SERVICES = new Set(Object.keys(SERVICOS));
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// timeout de 25s + 1 retry no SDK (mesma justificativa do lila-openai)
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  timeout: 25_000,
+  maxRetries: 1,
+});
 const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
 
 // Custos aproximados Sonnet 4.6 — usado só pra dashboard admin

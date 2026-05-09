@@ -18,7 +18,13 @@ import { logger } from '../utils/logger.js';
 
 const VALID_SERVICES = new Set(Object.keys(SERVICOS));
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// timeout de 25s + 1 retry no SDK. Sem isso, OpenAI degradada trava
+// o webhook handler por 60-120s (default do SDK), encadeando WAL e leads.
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: 25_000,
+  maxRetries: 1,
+});
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 
 const COST_IN_PER_MTOK = 0.40;
