@@ -11,7 +11,7 @@ import { generateTinaReply } from '../agent/tina.js';
 import { sendSequence, sendText } from '../agent/messenger.js';
 import {
   pauseIA, scheduleFollowup, handleSDRReply,
-  markQualifiedAndHandoff, markDisqualified,
+  markQualifiedAndHandoff, markDisqualified, tagLeadProgress,
 } from '../agent/handoff.js';
 
 const router = express.Router();
@@ -196,6 +196,8 @@ async function handleInbound(event) {
     await markDisqualified(fresh, result);
   } else {
     scheduleFollowup(fresh.id, 'silencio_lead');
+    // Mantém a etiqueta de temperatura do lead em dia (quente/morno/frio)
+    await tagLeadProgress(fresh, result);
   }
 }
 

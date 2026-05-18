@@ -9,7 +9,7 @@ import { generateTinaReply } from '../agent/tina.js';
 import { sendSequence, sendText } from '../agent/messenger.js';
 import {
   pauseIA, scheduleFollowup,
-  markQualifiedAndHandoff, markDisqualified,
+  markQualifiedAndHandoff, markDisqualified, tagLeadProgress,
 } from '../agent/handoff.js';
 import { withContactLock } from '../utils/contactLock.js';
 import { GHL } from '../ghl/client.js';
@@ -498,6 +498,8 @@ async function handleInbound(event) {
       await markDisqualified(fresh, result);
     } else {
       scheduleFollowup(fresh.id, 'silencio_lead');
+      // Mantém a etiqueta de temperatura do lead em dia (quente/morno/frio)
+      await tagLeadProgress(fresh, result);
     }
   });
 }

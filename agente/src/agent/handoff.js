@@ -6,6 +6,54 @@ import { logger } from '../utils/logger.js';
 
 const FOLLOWUP_MIN = Number(process.env.FOLLOWUP_SILENCE_MINUTES || 60);
 
+// === Etiquetas GHL (esquema real da LC) ===
+// Configuráveis por env — se a LC renomear uma etiqueta, ajusta a variável
+// sem mexer no código. Defaults = nomes confirmados pela Icá (mai/2026).
+const TAG = {
+  closers: process.env.GHL_TAG_CLOSERS || 'funil-lca-closers',
+  quente: process.env.GHL_TAG_QUENTE || 'quente',
+  morno: process.env.GHL_TAG_MORNO || 'morno',
+  frio: process.env.GHL_TAG_FRIO || 'frio',
+};
+
+// Temperatura do lead pelo score de qualificação.
+function temperatureForScore(score) {
+  const s = Number(score) || 0;
+  if (s >= 60) return TAG.quente;
+  if (s >= 30) return TAG.morno;
+  return TAG.frio;
+}
+
+// Sincroniza a etiqueta de temperatura no GHL.
+// Só chama a API do GHL quando a faixa MUDA (compara com contacts.ghl_temp_tag)
+// — evita spammar a API a cada turno da conversa.
+async function syncTemperatureTag(contact, score) {
+  if (!process.env.GHL_API_TOKEN) return;
+  // Contato ainda com ID sintético wa- não existe no GHL — pula
+  if (!contact.ghl_contact_id || String(contact.ghl_contact_id).startsWith('wa-')) return;
+
+  const wanted = temperatureForScore(score);
+  const current = contact.ghl_temp_tag || null;
+  if (wanted === current) return; // já está na faixa certa
+
+  try {
+    if (current) {
+      await GHL.removeTag(contact.ghl_contact_id, [current]).catch(() => {});
+    }
+    await GHL.addTag(contact.ghl_contact_id, [wanted]);
+    db.prepare('UPDATE contacts SET ghl_temp_tag = ? WHERE id = ?').run(wanted, contact.id);
+    logger.info({ contactId: contact.id, from: current, to: wanted }, 'temperatura GHL atualizada');
+  } catch (err) {
+    logger.error({ err: err.message, contactId: contact.id }, 'falha ao sincronizar temperatura GHL');
+  }
+}
+
+// Chamado a cada turno enquanto o lead ainda está em qualificação (não fez
+// handoff nem foi descartado). Mantém a etiqueta de temperatura em dia.
+export async function tagLeadProgress(contact, result) {
+  await syncTemperatureTag(contact, result?.qualification_score);
+}
+
 export function pauseIA(contactId, reason = 'sdr_assumiu') {
   db.prepare(`
     UPDATE contacts
@@ -48,11 +96,12 @@ export async function markQualifiedAndHandoff(contact, result) {
 
   pauseIA(contact.id, 'qualificado_pronto_pro_sdr');
 
-  // GHL: tag + custom fields + oportunidade em paralelo (não deixa um erro travar os outros)
-  const tag = GHL.addTag(contact.ghl_contact_id, [
-    'iara-qualificado',
-    result.funnel ? `funil-${result.funnel}` : 'funil-indefinido',
-  ].filter(Boolean)).catch(err => logger.error({ err: err.message }, 'tag GHL falhou'));
+  // GHL: etiquetas + custom fields + oportunidade em paralelo (erro de um não trava os outros)
+  // Etiqueta funil-lca-closers = lead "passa pras closers". Temperatura = quente.
+  const tag = (async () => {
+    await syncTemperatureTag(contact, result.qualification_score);
+    await GHL.addTag(contact.ghl_contact_id, [TAG.closers]);
+  })().catch(err => logger.error({ err: err.message }, 'tag GHL (handoff) falhou'));
 
   const fields = writeQualificationFields(contact.ghl_contact_id, {
     funnel: result.funnel,
@@ -88,7 +137,8 @@ export async function markDisqualified(contact, result) {
   `).run(result.qualification_score || 0, result.qualification_notes || '', contact.id);
 
   try {
-    await GHL.addTag(contact.ghl_contact_id, ['iara-desqualificado']);
+    // Lead descartado → temperatura frio (score baixo cai na faixa frio)
+    await syncTemperatureTag(contact, result.qualification_score);
     await writeQualificationFields(contact.ghl_contact_id, {
       funnel: result.funnel,
       score: result.qualification_score,

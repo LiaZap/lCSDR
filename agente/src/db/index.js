@@ -40,7 +40,11 @@ export function runSchema() {
   safeAddColumn('messages', 'cached_tokens', 'INTEGER DEFAULT 0');
   safeAddColumn('messages', 'provider', 'TEXT');         // 'openai' | 'anthropic'
   safeAddColumn('messages', 'model_used', 'TEXT');       // 'gpt-4.1-mini' | 'claude-sonnet-4-6'
-  safeAddColumn('messages', 'prompt_version', 'TEXT');   // SHA1[:10] do LILA_SYSTEM_PROMPT
+  safeAddColumn('messages', 'prompt_version', 'TEXT');   // SHA1[:10] do TINA_SYSTEM_PROMPT
+
+  // Etiqueta de temperatura atual do lead no GHL (quente/morno/frio).
+  // Guardada localmente pra só chamar a API do GHL quando a faixa MUDA.
+  safeAddColumn('contacts', 'ghl_temp_tag', 'TEXT');
 }
 
 // Garante schema na primeira importação
