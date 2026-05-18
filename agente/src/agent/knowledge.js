@@ -1,4 +1,4 @@
-// Base de conhecimento da Lila — fonte única de verdade sobre Grupo LC.
+// Base de conhecimento da Tina — fonte única de verdade sobre Grupo LC.
 // Mantenha este arquivo atualizado quando produtos/preços/links mudarem.
 // Extraído de: docs/source-material/01-lila-treinamento-completo.md
 //              docs/source-material/02-manual-servicos-triagem.md
@@ -209,14 +209,14 @@ export const SERVICOS = {
   },
 };
 
-// === Pricing público (o que a Lila PODE mencionar) ===
-// Tudo o resto é "sob orçamento" e a Lila passa pro humano.
+// === Pricing público (o que a Tina PODE mencionar) ===
+// Tudo o resto é "sob orçamento" e a Tina passa pro humano.
 export const PRECOS_PUBLICOS = {
   livro_secreto: { valor: 'R$ 59,90', produto: 'O Livro Secreto do Escritor' },
 };
 
 // === Triagem por árvore de decisão ===
-// Esta é a sequência exata que a Lila usa pra identificar serviço certo.
+// Esta é a sequência exata que a Tina usa pra identificar serviço certo.
 export const TRIAGEM = `
 PERGUNTA 1 — Você é AUTOR (escritor) ou representa uma EDITORA?
   → EDITORA: encaminhar pra closer (Assessoria e Consultoria para Editoras)
@@ -242,7 +242,7 @@ PERGUNTA 4 (complementar) — Tem SITE pro livro/obra?
   → NÃO: oferecer Desenvolvimento de Sites como complemento
 `.trim();
 
-// === Avisos importantes (regras duras que a Lila respeita sempre) ===
+// === Avisos importantes (regras duras que a Tina respeita sempre) ===
 export const REGRAS_DURAS = [
   '⚠ A LC NÃO faz agenciamento literário. Quem busca isso vai pro Curso Escritores Admiráveis (que ensina a enviar proposta pra editora).',
   '⚠ Master LC e Press LC exigem livro PUBLICADO ou em pré-venda com link.',
@@ -253,25 +253,29 @@ export const REGRAS_DURAS = [
   '⚠ Assessoria pra Editoras: SOMENTE pra quem tem ou está abrindo editora; autor individual vai pra outras.',
 ];
 
-// === Links úteis que a Lila pode mandar ===
+// === Links úteis que a Tina pode mandar ===
 export const LINKS = {
   // Sites
   agencia: 'https://lcagencia.com.br',
   editora: 'https://lcbookseditora.com.br',
   lilian: 'https://liliancardoso.com.br',
   press_lc: 'https://presslc.com',
-  // Material gratuito
-  livro_secreto: 'https://vempra.lc/livro',
-  instagram_lilian: 'https://www.instagram.com/liliancardoso',
+  // Material gratuito / ofertas de entrada (Documentação Estratégica Tina, mai/2026)
+  livro_secreto: 'https://olivrosecretodoescritor.com.br/',
+  instagram_lilian: 'https://www.instagram.com/liliancardoso/',
+  youtube_lilian: 'https://www.youtube.com/@liliancardoso',
+  blog_lilian: 'https://liliancardoso.com.br/blog/',
   telegram: 'https://liliancardoso.com.br/telegram',
   // Ferramentas
   contar_caracteres: 'https://lceditorial.com.br/contar-caracteres',
   // Cursos
-  curso_admiraveis: 'https://escritoresadmiraveis.com.br',
+  curso_admiraveis: 'https://escritoresadmiraveis.com.br/',
   depoimentos_admiraveis: 'https://escritoresadmiraveis.com.br/depoimentos/',
   // Mentorias
   arquitetos_livro: 'https://liliancardoso.com.br/arquitetosdolivro/',
   dna_bestseller: 'https://liliancardoso.com.br/mentoria/',
+  // Serviços
+  leitura_critica: 'https://lcagencia.com.br/leitura-critica/',
   // Vídeo curso
   youtube_curso: 'https://www.youtube.com/watch?v=tahhnLdtMhc',
   // E-mails

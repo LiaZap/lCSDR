@@ -106,7 +106,7 @@ app.use((err, req, res, _next) => {
 const PORT = Number(process.env.PORT || 3333);
 app.listen(PORT, async () => {
   const channel = process.env.UAZAPI_TOKEN ? 'uazapi' : 'ghl';
-  logger.info({ port: PORT, channel }, `🤖 Lila online — LC SDR agent`);
+  logger.info({ port: PORT, channel }, `🤖 Tina online — LC SDR agent`);
   // Pré-carrega cache de custom fields do GHL (não-bloqueante)
   refreshCustomFieldsCache().catch(() => {});
   startScheduler();

@@ -26,7 +26,7 @@ router.get('/metrics', (req, res) => {
   `).get(days);
 
   // Tempo médio de 1ª resposta (entre primeira mensagem inbound e primeira outbound da IA)
-  // Útil pro Lilian ver que a Lila responde em segundos vs SDR humano que demora horas
+  // Útil pro Lilian ver que a Tina responde em segundos vs SDR humano que demora horas
   const tempoResposta = db.prepare(`
     SELECT AVG(diff_seconds) as media, MIN(diff_seconds) as menor, MAX(diff_seconds) as maior
     FROM (

@@ -27,7 +27,7 @@ async function main() {
     }
     case 'text': {
       const number = normalizePhone(args[0]);
-      const text = args.slice(1).join(' ') || 'Olá! Teste da Lila.';
+      const text = args.slice(1).join(' ') || 'Olá! Teste da Tina.';
       console.log('→ enviando texto pra', number);
       pp(await UAZAPI.sendText(number, text));
       break;

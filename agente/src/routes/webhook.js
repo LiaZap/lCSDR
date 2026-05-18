@@ -7,7 +7,7 @@ import { transcribeAudioBuffer } from '../utils/transcribe.js';
 import {
   upsertContactFromGHL, recordInbound, recordOutbound, countMessagesToday,
 } from '../agent/contactService.js';
-import { generateLilaReply } from '../agent/lila.js';
+import { generateTinaReply } from '../agent/tina.js';
 import { sendSequence, sendText } from '../agent/messenger.js';
 import {
   pauseIA, scheduleFollowup, handleSDRReply,
@@ -158,8 +158,8 @@ async function handleInbound(event) {
     return;
   }
 
-  // 5) Gera resposta da Lila
-  const result = await generateLilaReply({ contact: fresh, incomingText: content });
+  // 5) Gera resposta da Tina
+  const result = await generateTinaReply({ contact: fresh, incomingText: content });
 
   // 6) Envia resposta(s) — canal escolhido pelo messenger (uazapi se UAZAPI_TOKEN setado, senão GHL)
   const items = result.split && result.split.length ? result.split : [result.reply];

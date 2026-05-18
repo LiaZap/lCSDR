@@ -1,4 +1,4 @@
-// Lila via OpenAI Responses API (gpt-4.1-mini)
+// Tina via OpenAI Responses API (gpt-4.1-mini)
 //
 // Por que Responses API e não Chat Completions:
 //   - Suporte nativo a structured output via JSON Schema strict (garante formato)
@@ -11,7 +11,7 @@
 //   - Output:       $1.60 / 1M tokens   (~9.4x mais barato)
 
 import OpenAI from 'openai';
-import { LILA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
+import { TINA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
 import { SERVICOS } from './knowledge.js';
 import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
@@ -35,12 +35,12 @@ const COST_IN_PER_MTOK = 0.40;
 const COST_CACHED_IN_PER_MTOK = 0.10;
 const COST_OUT_PER_MTOK = 1.60;
 
-// === JSON Schema da resposta da Lila ===
+// === JSON Schema da resposta da Tina ===
 // OpenAI strict mode exige:
 //  - Todos os campos em `required`
 //  - `additionalProperties: false`
 //  - Sem `minimum`/`maximum` (validados client-side se precisar)
-const LILA_SCHEMA = {
+const TINA_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: [
@@ -51,7 +51,7 @@ const LILA_SCHEMA = {
   properties: {
     reply: {
       type: 'string',
-      description: 'Texto da resposta da Lila (1-3 linhas pra WhatsApp). Vazio se split for usado.',
+      description: 'Texto da resposta da Tina (1-3 linhas pra WhatsApp). Vazio se split for usado.',
     },
     split: {
       anyOf: [
@@ -96,7 +96,7 @@ const LILA_SCHEMA = {
         { type: 'null' },
         { type: 'string', enum: ['escrever', 'publicar', 'divulgar'] },
       ],
-      description: 'Qual dos 3 funis Lila identificou (null se ainda não dá pra saber)',
+      description: 'Qual dos 3 funis Tina identificou (null se ainda não dá pra saber)',
     },
     service_recommended: {
       anyOf: [{ type: 'string' }, { type: 'null' }],
@@ -119,7 +119,7 @@ const LILA_SCHEMA = {
       type: 'string',
       description: 'Anotação curta pro humano (perfil, urgência, sinais)',
     },
-    end_conversation: { type: 'boolean', description: 'true se Lila encerrou a conversa por desqualificação ou off-topic' },
+    end_conversation: { type: 'boolean', description: 'true se Tina encerrou a conversa por desqualificação ou off-topic' },
   },
 };
 
@@ -182,7 +182,7 @@ function buildHistory(contactId, limit = 30) {
   });
 }
 
-export async function generateLilaReplyOpenAI({ contact, incomingText }) {
+export async function generateTinaReplyOpenAI({ contact, incomingText }) {
   const history = buildHistory(contact.id);
   if (history.length === 0 || history[history.length - 1].role !== 'user') {
     history.push({ role: 'user', content: incomingText });
@@ -202,12 +202,12 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
   // (>1024 tokens). Antes, juntávamos `meta` (que muda a cada turno) ao
   // `instructions`, invalidando o cache em TODA chamada — gastando ~3-4x
   // mais. Agora `meta` vai como mensagem developer no início do `input`,
-  // e o LILA_SYSTEM_PROMPT permanece estável em `instructions`.
+  // e o TINA_SYSTEM_PROMPT permanece estável em `instructions`.
   let response;
   try {
     response = await client.responses.create({
       model: MODEL,
-      instructions: LILA_SYSTEM_PROMPT,
+      instructions: TINA_SYSTEM_PROMPT,
       input: [
         { role: 'developer', content: meta },
         ...history,
@@ -215,9 +215,9 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
       text: {
         format: {
           type: 'json_schema',
-          name: 'lila_response',
+          name: 'tina_response',
           strict: true,
-          schema: LILA_SCHEMA,
+          schema: TINA_SCHEMA,
         },
       },
       max_output_tokens: 900,
@@ -232,7 +232,7 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
   try {
     parsed = JSON.parse(raw);
   } catch {
-    logger.warn({ raw: raw.slice(0, 300) }, 'Lila (OpenAI) JSON inválido — fallback');
+    logger.warn({ raw: raw.slice(0, 300) }, 'Tina (OpenAI) JSON inválido — fallback');
     parsed = null;
   }
 
@@ -272,12 +272,12 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
     };
   }
 
-  // Defesa contra hallucination de serviço: se a Lila inventou uma chave,
+  // Defesa contra hallucination de serviço: se a Tina inventou uma chave,
   // descarta pra não confirmar produto inexistente pro lead.
   if (parsed.service_recommended && !VALID_SERVICES.has(parsed.service_recommended)) {
     logger.warn(
       { invented: parsed.service_recommended, valid: [...VALID_SERVICES] },
-      'Lila inventou serviço inexistente — descartando service_recommended'
+      'Tina inventou serviço inexistente — descartando service_recommended'
     );
     parsed.service_recommended = null;
   }

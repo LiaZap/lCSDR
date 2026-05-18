@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { LILA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
+import { TINA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
 import { SERVICOS } from './knowledge.js';
 import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
@@ -8,7 +8,7 @@ const VALID_SERVICES = new Set(Object.keys(SERVICOS));
 const PROVIDER = 'anthropic';
 const MAX_HISTORY_TOKENS = Number(process.env.LLM_HISTORY_MAX_TOKENS || 8000);
 
-// timeout de 25s + 1 retry no SDK (mesma justificativa do lila-openai)
+// timeout de 25s + 1 retry no SDK (mesma justificativa do tina-openai)
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
   timeout: 25_000,
@@ -95,7 +95,7 @@ function tryParseJSON(text) {
   return null;
 }
 
-export async function generateLilaReplyAnthropic({ contact, incomingText }) {
+export async function generateTinaReplyAnthropic({ contact, incomingText }) {
   const history = buildHistory(contact.id);
 
   if (history.length === 0 || history[history.length - 1].role !== 'user') {
@@ -115,7 +115,7 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
     model: MODEL,
     max_tokens: 900,
     system: [
-      { type: 'text', text: LILA_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: TINA_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
       { type: 'text', text: meta },
     ],
     messages: history,
@@ -149,7 +149,7 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
   };
 
   if (!parsed || (!parsed.reply && !parsed.split)) {
-    logger.warn({ raw: raw.slice(0, 300) }, 'Lila devolveu JSON inválido, usando fallback');
+    logger.warn({ raw: raw.slice(0, 300) }, 'Tina devolveu JSON inválido, usando fallback');
     return {
       reply: 'Deixa eu te conectar com alguém aqui do time, [aguarde um instante].',
       funnel: null,
@@ -157,17 +157,17 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
       handoff: true,
       handoff_reason: 'IA falhou em gerar resposta válida — encaminhando ao humano',
       qualification_score: 0,
-      qualification_notes: '⚠ Lila falhou em gerar resposta válida',
+      qualification_notes: '⚠ Tina falhou em gerar resposta válida',
       end_conversation: false,
       usage: meta_usage,
     };
   }
 
-  // Defesa contra hallucination de serviço (mesmo guard do lila-openai)
+  // Defesa contra hallucination de serviço (mesmo guard do tina-openai)
   if (parsed.service_recommended && !VALID_SERVICES.has(parsed.service_recommended)) {
     logger.warn(
       { invented: parsed.service_recommended },
-      'Lila (Anthropic) inventou serviço inexistente — descartando'
+      'Tina (Anthropic) inventou serviço inexistente — descartando'
     );
     parsed.service_recommended = null;
   }

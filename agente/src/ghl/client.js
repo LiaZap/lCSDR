@@ -99,6 +99,19 @@ export const GHL = {
     });
     return ghl('GET', `/contacts/?${q}`);
   },
+  // Cria OU atualiza contato por telefone/email. Retorna { contact, new }.
+  // Usado pra sincronizar leads que entram pela uazapi (WhatsApp) com o GHL.
+  async upsertContact({ phone, email, name, firstName, lastName, source, tags } = {}) {
+    const body = { locationId: process.env.GHL_LOCATION_ID };
+    if (phone) body.phone = phone;
+    if (email) body.email = email;
+    if (name) body.name = name;
+    if (firstName) body.firstName = firstName;
+    if (lastName) body.lastName = lastName;
+    if (source) body.source = source;
+    if (tags && tags.length) body.tags = tags;
+    return ghl('POST', '/contacts/upsert', body);
+  },
   async updateContact(contactId, patch) {
     return ghl('PUT', `/contacts/${contactId}`, patch);
   },

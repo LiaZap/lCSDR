@@ -81,7 +81,7 @@ export const UAZAPI = {
    * @param {string} [opts.footerText] — texto pequeno embaixo
    * @param {string[]} opts.choices — formato "Label|valor"
    *   - valor pode ser:
-   *     - string qualquer → vira reply (a Lila recebe "valor" no webhook)
+   *     - string qualquer → vira reply (a Tina recebe "valor" no webhook)
    *     - URL `https://...` → botão de link
    *     - `call:+5511...` → botão de ligar
    * @param {'button'|'list'} [opts.type='button'] — button (até 3) ou list (até 10)

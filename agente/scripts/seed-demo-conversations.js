@@ -1,4 +1,4 @@
-// Popula o banco com 30+ conversas demo geradas pela própria Lila.
+// Popula o banco com 30+ conversas demo geradas pela própria Tina.
 // Útil pra Lilian/Bruna abrirem o dashboard e VEREM dado real (não vazio).
 //
 // Uso: node scripts/seed-demo-conversations.js [count]
@@ -6,7 +6,7 @@
 
 import 'dotenv/config';
 import { db } from '../src/db/index.js';
-import { generateLilaReply } from '../src/agent/lila.js';
+import { generateTinaReply } from '../src/agent/tina.js';
 import { recordInbound, recordOutbound } from '../src/agent/contactService.js';
 
 // Pool de conversas demo — variações do test-suite + casos novos.
@@ -192,7 +192,7 @@ async function seedOne(persona) {
 
     let result;
     try {
-      result = await generateLilaReply({ contact: fresh, incomingText: userMsg });
+      result = await generateTinaReply({ contact: fresh, incomingText: userMsg });
     } catch (err) {
       console.error(`  ❌ ${persona.name}: ${err.message}`);
       break;

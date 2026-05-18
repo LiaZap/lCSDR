@@ -5,13 +5,14 @@ import { transcribeAudioBuffer } from '../utils/transcribe.js';
 import {
   recordInbound, recordOutbound, countMessagesToday,
 } from '../agent/contactService.js';
-import { generateLilaReply } from '../agent/lila.js';
+import { generateTinaReply } from '../agent/tina.js';
 import { sendSequence, sendText } from '../agent/messenger.js';
 import {
   pauseIA, scheduleFollowup,
   markQualifiedAndHandoff, markDisqualified,
 } from '../agent/handoff.js';
 import { withContactLock } from '../utils/contactLock.js';
+import { GHL } from '../ghl/client.js';
 
 const router = express.Router();
 
@@ -265,20 +266,66 @@ function classifyMessage(msg) {
   return { category: 'unknown', text: '', mediaUrl: null, rawType };
 }
 
-function findOrCreateContactByPhone(phone, name) {
-  const ghlId = `wa-${phone}`;
-  let contact = db.prepare('SELECT * FROM contacts WHERE ghl_contact_id = ?').get(ghlId);
-  if (!contact) {
-    const info = db.prepare(`
-      INSERT INTO contacts (ghl_contact_id, name, phone, stage)
-      VALUES (?, ?, ?, 'novo')
-    `).run(ghlId, name || null, phone);
-    contact = db.prepare('SELECT * FROM contacts WHERE id = ?').get(info.lastInsertRowid);
-  } else if (name && !contact.name) {
-    db.prepare('UPDATE contacts SET name = ? WHERE id = ?').run(name, contact.id);
-    contact = { ...contact, name };
+// Sincroniza o contato com o GHL (cria ou atualiza lá). Retorna o ID real
+// do GHL, ou null se o GHL não estiver configurado / falhar.
+// É resiliente: se o GHL cair, o atendimento continua com ID local `wa-`.
+async function syncContactToGHL(phone, name) {
+  if (!process.env.GHL_API_TOKEN || !process.env.GHL_LOCATION_ID) {
+    return null; // GHL não configurado — segue só local
   }
-  return contact;
+  try {
+    const r = await GHL.upsertContact({
+      phone: phone.startsWith('+') ? phone : `+${phone}`,
+      name: name || undefined,
+      source: 'WhatsApp (Tina)',
+      tags: ['tina-whatsapp'],
+    });
+    const id = r?.contact?.id || r?.id || null;
+    if (id) {
+      logger.info({ phone, ghlId: id, isNew: r?.new }, 'contato sincronizado com GHL');
+    }
+    return id;
+  } catch (err) {
+    logger.error({ phone, err: err.message }, 'falha ao sincronizar contato com GHL — usando ID local');
+    return null;
+  }
+}
+
+async function findOrCreateContactByPhone(phone, name) {
+  // Busca local: por telefone OU pelo ID sintético antigo (wa-)
+  let contact = db.prepare(
+    'SELECT * FROM contacts WHERE phone = ? OR ghl_contact_id = ?'
+  ).get(phone, `wa-${phone}`);
+
+  if (contact) {
+    if (name && !contact.name) {
+      db.prepare('UPDATE contacts SET name = ? WHERE id = ?').run(name, contact.id);
+      contact = { ...contact, name };
+    }
+    // Contato antigo ainda com ID sintético — tenta promover pro ID real do GHL
+    if (typeof contact.ghl_contact_id === 'string' && contact.ghl_contact_id.startsWith('wa-')) {
+      const ghlId = await syncContactToGHL(phone, name || contact.name);
+      if (ghlId) {
+        try {
+          db.prepare('UPDATE contacts SET ghl_contact_id = ? WHERE id = ?').run(ghlId, contact.id);
+          contact = { ...contact, ghl_contact_id: ghlId };
+        } catch (err) {
+          // UNIQUE colidiu (já existe linha com esse ID GHL) — mantém local, loga
+          logger.warn({ contactId: contact.id, ghlId, err: err.message }, 'não promoveu ghl_contact_id (colisão)');
+        }
+      }
+    }
+    return contact;
+  }
+
+  // Contato novo: cria no GHL primeiro pra já nascer com o ID real
+  const ghlId = await syncContactToGHL(phone, name);
+  const finalId = ghlId || `wa-${phone}`;
+  const info = db.prepare(`
+    INSERT INTO contacts (ghl_contact_id, name, phone, stage)
+    VALUES (?, ?, ?, 'novo')
+  `).run(finalId, name || null, phone);
+  return db.prepare('SELECT * FROM contacts WHERE id = ?').get(info.lastInsertRowid);
 }
 
 async function handleInbound(event) {
@@ -292,7 +339,7 @@ async function handleInbound(event) {
   }
 
   const name = msg.senderName || chat.name || chat.wa_name || null;
-  const contact = findOrCreateContactByPhone(phone, name);
+  const contact = await findOrCreateContactByPhone(phone, name);
 
   // Classifica a mensagem (Conversation/ExtendedText/Audio/Image/Document/etc)
   const m = classifyMessage(msg);
@@ -311,7 +358,7 @@ async function handleInbound(event) {
     }
 
     case 'button_reply': {
-      // Lead clicou num botão/lista da Lila
+      // Lead clicou num botão/lista da Tina
       const label = m.text || m.buttonId;
       content = `[lead clicou: ${label}] (valor=${m.buttonId})`;
       content_type = 'button_click';
@@ -417,7 +464,7 @@ async function handleInbound(event) {
     }
 
     // Gera resposta
-    const result = await generateLilaReply({ contact: fresh, incomingText: content });
+    const result = await generateTinaReply({ contact: fresh, incomingText: content });
 
     const items = result.split && result.split.length ? result.split : [result.reply];
     await sendSequence(fresh, items);

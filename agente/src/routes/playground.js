@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
 import { authMiddleware } from './auth.js';
-import { generateLilaReply } from '../agent/lila.js';
+import { generateTinaReply } from '../agent/tina.js';
 import { recordInbound, recordOutbound } from '../agent/contactService.js';
 import { logger } from '../utils/logger.js';
 
@@ -38,7 +38,7 @@ router.post('/chat', async (req, res) => {
     recordInbound(contact.id, { content: message });
 
     const fresh = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id);
-    const result = await generateLilaReply({ contact: fresh, incomingText: message });
+    const result = await generateTinaReply({ contact: fresh, incomingText: message });
 
     // Registra resposta(s) no banco (sem mandar pra lugar nenhum — é playground)
     // Cada item pode ser string OU {text, buttons:[{label,value}]}

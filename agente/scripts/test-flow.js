@@ -1,4 +1,4 @@
-// Teste interno end-to-end da Lila SEM mandar pro WhatsApp real.
+// Teste interno end-to-end da Tina SEM mandar pro WhatsApp real.
 // Simula conversas com personas, mostra a resposta + qualificação + payload uazapi que iria.
 //
 // Uso:
@@ -10,7 +10,7 @@
 
 import 'dotenv/config';
 import { db } from '../src/db/index.js';
-import { generateLilaReply } from '../src/agent/lila.js';
+import { generateTinaReply } from '../src/agent/tina.js';
 import { recordInbound, recordOutbound } from '../src/agent/contactService.js';
 
 const PERSONAS = {
@@ -83,9 +83,9 @@ async function runPersona(key) {
 
     let result;
     try {
-      result = await generateLilaReply({ contact: fresh, incomingText: userMsg });
+      result = await generateTinaReply({ contact: fresh, incomingText: userMsg });
     } catch (err) {
-      console.error('  ❌ Lila falhou:', err.message);
+      console.error('  ❌ Tina falhou:', err.message);
       console.error('  ', err.body || '');
       break;
     }
@@ -112,7 +112,7 @@ async function runPersona(key) {
       const buttons = (typeof item === 'object' && item?.buttons) || null;
       const footer = (typeof item === 'object' && item?.footerText) || null;
 
-      console.log(`\n  💬 Lila${items.length > 1 ? ` (bolha ${idx + 1})` : ''}:`);
+      console.log(`\n  💬 Tina${items.length > 1 ? ` (bolha ${idx + 1})` : ''}:`);
       text.split('\n').forEach(l => console.log(`     ${l}`));
 
       if (buttons && buttons.length) {
@@ -147,7 +147,7 @@ async function runPersona(key) {
 
     // Para se a IA já encerrou ou já fez handoff
     if (result.end_conversation || result.handoff) {
-      console.log(`\n  → fluxo encerrado pela Lila no turno ${i + 1}`);
+      console.log(`\n  → fluxo encerrado pela Tina no turno ${i + 1}`);
       break;
     }
   }

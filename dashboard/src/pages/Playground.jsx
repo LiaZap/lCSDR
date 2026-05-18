@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '../lib/api.js';
 
-// Playground: chat ao vivo com a Lila sem passar pelo GHL.
+// Playground: chat ao vivo com a Tina sem passar pelo GHL.
 // Serve pra refinar prompt, gerar exemplos bons/ruins e demonstrar pra Lilian.
 
 const PERSONAS_SUGESTAO = [
@@ -94,7 +94,7 @@ export default function Playground() {
       <div className="page-header">
         <div>
           <h1>Playground</h1>
-          <div className="muted small">Converse com a Lila sem passar pelo WhatsApp real · use pra refinar o script</div>
+          <div className="muted small">Converse com a Tina sem passar pelo WhatsApp real · use pra refinar o script</div>
         </div>
         <div className="row">
           <input
@@ -188,7 +188,7 @@ export default function Playground() {
               <div key={m.id} className={`bubble ${m.author === 'lead' ? 'lead' : m.author === 'ia' ? 'ia' : 'sdr'}`}>
                 {m.content}
                 <div className="meta">
-                  {m.author === 'lead' ? 'Lead' : m.author === 'ia' ? 'Lila' : 'SDR'} ·{' '}
+                  {m.author === 'lead' ? 'Lead' : m.author === 'ia' ? 'Tina' : 'SDR'} ·{' '}
                   {new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                 </div>
               </div>
@@ -196,11 +196,11 @@ export default function Playground() {
 
             {sending && (
               <div className="bubble ia" style={{ opacity: 0.6 }}>
-                Lila digitando…
+                Tina digitando…
               </div>
             )}
 
-            {/* Botões da última resposta da Lila — clique manda o `value` como nova mensagem */}
+            {/* Botões da última resposta da Tina — clique manda o `value` como nova mensagem */}
             {!sending && lastResult?.buttons?.length > 0 && (
               <div style={{ alignSelf: 'flex-end', display: 'flex', flexDirection: 'column', gap: 6, maxWidth: '72%' }}>
                 {lastResult.buttons.map((b, i) => (
@@ -239,7 +239,7 @@ export default function Playground() {
               disabled={sending}
             />
             <button className="primary" onClick={() => send()} disabled={sending || !msg.trim()}>
-              {sending ? 'Lila pensando…' : 'Enviar'}
+              {sending ? 'Tina pensando…' : 'Enviar'}
             </button>
           </div>
         </div>
@@ -288,9 +288,9 @@ export default function Playground() {
           </div>
 
           <div className="card">
-            <h3>Notas da Lila</h3>
+            <h3>Notas da Tina</h3>
             <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, marginTop: 10, color: 'var(--lc-ink)' }}>
-              {contact?.qualification_notes || <span className="muted">Ainda sem notas — a Lila escreve conforme a conversa avança.</span>}
+              {contact?.qualification_notes || <span className="muted">Ainda sem notas — a Tina escreve conforme a conversa avança.</span>}
             </div>
           </div>
         </div>

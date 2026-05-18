@@ -1,4 +1,4 @@
-// Router de provider LLM da Lila + sanitização pós-resposta.
+// Router de provider LLM da Tina + sanitização pós-resposta.
 //
 // Resolução de provider:
 //   1. Se LLM_PROVIDER=openai|anthropic estiver explícito → usa esse
@@ -9,8 +9,8 @@
 //   Mesmo com regra explícita no prompt, o modelo às vezes manda "—" ou outras
 //   marcas de IA. Aplicamos sanitizeText() no output antes de devolver.
 
-import { generateLilaReplyOpenAI } from './lila-openai.js';
-import { generateLilaReplyAnthropic } from './lila-anthropic.js';
+import { generateTinaReplyOpenAI } from './tina-openai.js';
+import { generateTinaReplyAnthropic } from './tina-anthropic.js';
 import { logger } from '../utils/logger.js';
 
 let warnedProvider = false;
@@ -46,7 +46,7 @@ function sanitizeText(text) {
     .trim();
 }
 
-// Aplica sanitize em todos campos textuais da resposta da Lila
+// Aplica sanitize em todos campos textuais da resposta da Tina
 function sanitizeResult(result) {
   if (!result) return result;
 
@@ -91,8 +91,8 @@ function isRetryableLlmError(err) {
 
 function callProvider(name, args) {
   return name === 'openai'
-    ? generateLilaReplyOpenAI(args)
-    : generateLilaReplyAnthropic(args);
+    ? generateTinaReplyOpenAI(args)
+    : generateTinaReplyAnthropic(args);
 }
 
 function hasProviderKey(name) {
@@ -100,7 +100,7 @@ function hasProviderKey(name) {
   return !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.length > 30);
 }
 
-export async function generateLilaReply({ contact, incomingText }) {
+export async function generateTinaReply({ contact, incomingText }) {
   const primary = llmProvider();
   const secondary = primary === 'openai' ? 'anthropic' : 'openai';
 
@@ -150,8 +150,9 @@ export async function generateLilaReply({ contact, incomingText }) {
   }
 }
 
-// Alias pra compatibilidade
-export const generateIaraReply = generateLilaReply;
+// Aliases de compatibilidade durante a transição Lila → Tina
+export const generateLilaReply = generateTinaReply;
+export const generateIaraReply = generateTinaReply;
 
 // Exportado pra testes
 export { sanitizeText, sanitizeResult };

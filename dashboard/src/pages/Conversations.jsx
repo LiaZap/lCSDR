@@ -201,7 +201,7 @@ export default function Conversations() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {contact.ai_paused
                   ? <span className="tag black">🤖 IA pausada · SDR ativo</span>
-                  : <span className="tag magenta">🤖 Lila atendendo</span>}
+                  : <span className="tag magenta">🤖 Tina atendendo</span>}
                 {contact.ai_paused
                   ? <button onClick={release}>Devolver pra IA</button>
                   : <button className="primary" onClick={assume}>Assumir</button>}
@@ -215,7 +215,7 @@ export default function Conversations() {
                 <div key={m.id} className={`bubble ${m.author === 'lead' ? 'lead' : m.author === 'ia' ? 'ia' : 'sdr'}`}>
                   {m.content}
                   <div className="meta">
-                    {m.author === 'lead' ? '👤' : m.author === 'ia' ? '🤖 Lila' : '👨‍💼 SDR'} · {' '}
+                    {m.author === 'lead' ? '👤' : m.author === 'ia' ? '🤖 Tina' : '👨‍💼 SDR'} · {' '}
                     {new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
@@ -250,7 +250,7 @@ export default function Conversations() {
 
             {contact.qualification_notes && (
               <div style={{ marginTop: 14, padding: 10, background: 'var(--surface-bg)', borderRadius: 8, fontSize: 12, lineHeight: 1.5 }}>
-                <div className="small muted" style={{ marginBottom: 4 }}>Notas da Lila</div>
+                <div className="small muted" style={{ marginBottom: 4 }}>Notas da Tina</div>
                 {contact.qualification_notes}
               </div>
             )}
@@ -378,7 +378,7 @@ function FeedbackBox({ contactId, feedbacks, reload }) {
   return (
     <div className="card" style={{ borderTop: '3px solid var(--lc-magenta)', padding: 16 }}>
       <h3 style={{ fontSize: 14 }}>
-        Avalie o tom da Lila
+        Avalie o tom da Tina
         {justSaved && (
           <span style={{ marginLeft: 8, color: 'var(--lc-success)', fontSize: 12, fontWeight: 500 }}>
             ✓ Salvo

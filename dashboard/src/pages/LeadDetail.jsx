@@ -98,7 +98,7 @@ export default function LeadDetail() {
               <div key={m.id} className={`bubble ${m.author === 'lead' ? 'lead' : m.author === 'ia' ? 'ia' : 'sdr'}`}>
                 {m.content}
                 <div className="meta">
-                  {m.author === 'lead' ? 'Lead' : m.author === 'ia' ? 'Lila' : 'SDR'} ·{' '}
+                  {m.author === 'lead' ? 'Lead' : m.author === 'ia' ? 'Tina' : 'SDR'} ·{' '}
                   {new Date(m.created_at).toLocaleString('pt-BR')}
                 </div>
               </div>
@@ -129,7 +129,7 @@ export default function LeadDetail() {
               <div><strong>{contact.stage}</strong></div>
               <div className="small muted" style={{ marginTop: 10 }}>Score</div>
               <div><strong style={{ color: 'var(--lc-magenta-600)', fontSize: 20 }}>{contact.qualification_score || 0}/100</strong></div>
-              <div className="small muted" style={{ marginTop: 10 }}>Notas da Lila</div>
+              <div className="small muted" style={{ marginTop: 10 }}>Notas da Tina</div>
               <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, marginTop: 4 }}>
                 {contact.qualification_notes || <span className="muted">—</span>}
               </div>
@@ -155,7 +155,7 @@ export default function LeadDetail() {
   );
 }
 
-// === Card de feedback humano sobre o tom da Lila ===
+// === Card de feedback humano sobre o tom da Tina ===
 function FeedbackCard({ contactId, feedbacks, reload }) {
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
@@ -204,7 +204,7 @@ function FeedbackCard({ contactId, feedbacks, reload }) {
   return (
     <div className="card" style={{ borderTop: '3px solid var(--lc-magenta)' }}>
       <h3>
-        Avalie o tom da Lila
+        Avalie o tom da Tina
         {justSaved && (
           <span style={{ marginLeft: 8, color: 'var(--lc-success)', fontSize: 13, fontWeight: 500 }}>
             ✓ Salvo

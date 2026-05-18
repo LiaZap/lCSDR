@@ -11,12 +11,12 @@ import { api } from '../lib/api.js';
 // === Stages do pipeline ===
 const STAGES = [
   { id: 'novo', label: 'Novo', color: '#9A9A9A', desc: 'Acabou de chegar' },
-  { id: 'pre_qualificando', label: 'Pré-qualificando', color: '#E6227A', desc: 'Lila identificando funil' },
-  { id: 'qualificando', label: 'Qualificando', color: '#C71766', desc: 'Lila aprofundando' },
+  { id: 'pre_qualificando', label: 'Pré-qualificando', color: '#E6227A', desc: 'Tina identificando funil' },
+  { id: 'qualificando', label: 'Qualificando', color: '#C71766', desc: 'Tina aprofundando' },
   { id: 'qualificado', label: 'Qualificado', color: '#A01854', desc: 'Pronto pro Closer' },
   { id: 'handoff', label: 'Em handoff', color: '#111111', desc: 'SDR humano assumiu' },
   { id: 'agendado', label: 'Agendado', color: '#2F7D4B', desc: 'Reunião marcada' },
-  { id: 'desqualificado', label: 'Desqualificado', color: '#B3261E', desc: 'Lila filtrou' },
+  { id: 'desqualificado', label: 'Desqualificado', color: '#B3261E', desc: 'Tina filtrou' },
 ];
 
 const FUNNEL_LABELS = {

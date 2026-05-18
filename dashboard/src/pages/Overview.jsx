@@ -74,12 +74,12 @@ export default function Overview() {
           >×</button>
           <h2 style={{ marginBottom: 8 }}>👋 Bem-vinda{user?.name ? `, ${user.name.split(' ')[0]}` : ''}!</h2>
           <p style={{ marginBottom: 12, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
-            Esse é o painel da <strong>Lila</strong>, IA SDR do Grupo LC.
+            Esse é o painel da <strong>Tina</strong>, IA SDR do Grupo LC.
           </p>
           <div className="grid-3" style={{ marginTop: 16 }}>
             <div>
               <strong style={{ display: 'block', color: 'var(--lc-magenta)', marginBottom: 4 }}>▶ Playground</strong>
-              <span className="small" style={{ color: 'var(--text-secondary)' }}>Converse com a Lila como se fosse um lead. Teste tom e fluxo sem custo de WhatsApp.</span>
+              <span className="small" style={{ color: 'var(--text-secondary)' }}>Converse com a Tina como se fosse um lead. Teste tom e fluxo sem custo de WhatsApp.</span>
             </div>
             <div>
               <strong style={{ display: 'block', color: 'var(--lc-magenta)', marginBottom: 4 }}>⊞ Leads (Kanban)</strong>
@@ -87,7 +87,7 @@ export default function Overview() {
             </div>
             <div>
               <strong style={{ display: 'block', color: 'var(--lc-magenta)', marginBottom: 4 }}>✉ Conversas</strong>
-              <span className="small" style={{ color: 'var(--text-secondary)' }}>Inbox. Avalie tom da Lila com 👍/👎 — alimenta refinamento contínuo.</span>
+              <span className="small" style={{ color: 'var(--text-secondary)' }}>Inbox. Avalie tom da Tina com 👍/👎 — alimenta refinamento contínuo.</span>
             </div>
           </div>
         </div>
@@ -147,7 +147,7 @@ export default function Overview() {
         <KpiCard
           label="Em atendimento"
           value={emAtendimento}
-          hint="Lila conversando"
+          hint="Tina conversando"
           spark={porDia.map(d => ({ v: Math.max(0, (d.total || 0) - (d.qualificados || 0)) }))}
           sparkColor="var(--lc-magenta-600)"
         />
@@ -281,13 +281,13 @@ function generateInsights({ porDia, porFunil, porHora, tempoResposta, taxaQualif
   if (totalLeads === 0) return [];
   const ins = [];
 
-  // Insight 1: tempo médio de resposta da Lila — número que vende
+  // Insight 1: tempo médio de resposta da Tina — número que vende
   if (tempoResposta?.media && tempoResposta.media < 600) {
     const seg = Math.round(tempoResposta.media);
     ins.push({
       icon: '⚡',
       title: `Resposta em ${seg < 60 ? `${seg}s` : `${Math.round(seg / 60)}min`}`,
-      detail: 'Lila responde antes do lead esfriar',
+      detail: 'Tina responde antes do lead esfriar',
       color: 'var(--lc-success)',
     });
   }
@@ -319,7 +319,7 @@ function generateInsights({ porDia, porFunil, porHora, tempoResposta, taxaQualif
     ins.push({
       icon: '🎯',
       title: `${taxaQualificacao}% de conversão`,
-      detail: 'Acima da média, Lila qualificando bem',
+      detail: 'Acima da média, Tina qualificando bem',
       color: 'var(--lc-success)',
     });
   } else if (taxaQualificacao < 15 && totalLeads >= 10) {

@@ -55,7 +55,7 @@ export default function Feedback() {
       <div className="page-header">
         <div>
           <h1>Feedback do time</h1>
-          <div className="muted small">Revisões de tom da Lila feitas pela equipe LC · {total} avaliações no total</div>
+          <div className="muted small">Revisões de tom da Tina feitas pela equipe LC · {total} avaliações no total</div>
         </div>
         <button className="ghost" onClick={load} title="Recarregar">
           <Icon.Refresh width={16} height={16} />

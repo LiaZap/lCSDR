@@ -40,7 +40,7 @@ export default function Login() {
             <span className="login-eyebrow">Plataforma SDR · Grupo LC</span>
             <h1>Cada lead com a atenção certa, no momento certo.</h1>
             <p className="login-sub">
-              A Lila qualifica em segundos. Vocês fecham com tempo.
+              A Tina qualifica em segundos. Vocês fecham com tempo.
             </p>
           </div>
 
@@ -78,7 +78,7 @@ export default function Login() {
               </div>
               <div>
                 <strong>Humano sempre fecha</strong>
-                <span>Lila passa pro Closer no momento certo</span>
+                <span>Tina passa pro Closer no momento certo</span>
               </div>
             </li>
           </ul>
@@ -109,7 +109,7 @@ export default function Login() {
         <form className="login-form" onSubmit={submit}>
           <div className="login-form-header">
             <h2>Bem-vindo de volta</h2>
-            <p className="muted">Acesse o painel da Lila</p>
+            <p className="muted">Acesse o painel da Tina</p>
           </div>
 
           <div className="form-group">

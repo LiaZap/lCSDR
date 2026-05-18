@@ -44,7 +44,7 @@ function Shell({ children }) {
           <Icon.Menu width={20} height={20} />
         </button>
         <div className="brand">
-          <span>Lila</span>
+          <span>Tina</span>
           <span className="sub">SDR</span>
         </div>
         <button
@@ -67,7 +67,7 @@ function Shell({ children }) {
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-brand">
           <LCLogo variant="on-dark" size="md" />
-          <div className="sidebar-subbrand">Lila · SDR</div>
+          <div className="sidebar-subbrand">Tina · SDR</div>
         </div>
 
         <nav>

@@ -1,4 +1,4 @@
-// Suite de testes automatizada da Lila — múltiplos cenários + avaliação automática.
+// Suite de testes automatizada da Tina — múltiplos cenários + avaliação automática.
 //
 // Cada cenário tem:
 //   - turnos: mensagens do lead
@@ -11,7 +11,7 @@
 
 import 'dotenv/config';
 import { db } from '../src/db/index.js';
-import { generateLilaReply } from '../src/agent/lila.js';
+import { generateTinaReply } from '../src/agent/tina.js';
 import { recordInbound, recordOutbound } from '../src/agent/contactService.js';
 
 // ============================================================================
@@ -168,7 +168,7 @@ const SCENARIOS = {
 
   pergunta_agendamento: {
     nome: 'Quer agendar reunião direto',
-    descricao: 'Lila não agenda sozinha (fase 1) — passa pro Closer',
+    descricao: 'Tina não agenda sozinha (fase 1) — passa pro Closer',
     turnos: [
       'Oi! Quero marcar uma reunião com vocês, qual horário tem disponível?',
       'Sou autor de 3 livros, quero contratar Master LC.',
@@ -188,7 +188,7 @@ const SCENARIOS = {
     ],
     expects: [
       { field: 'turn1', op: 'notContainsAny', value: ['sou um robô', 'sou uma IA', 'sou um bot', 'sou um chatbot'] },
-      { field: 'turn1', op: 'oneOf', value: ['Lila', 'consultora', 'Lilian', 'time', 'primeiro contato'] },
+      { field: 'turn1', op: 'oneOf', value: ['Tina', 'consultora', 'Lilian', 'time', 'primeiro contato'] },
     ],
   },
 
@@ -216,7 +216,7 @@ const SCENARIOS = {
 
   pdf_recebido: {
     nome: 'Lead manda PDF',
-    descricao: 'Lila redireciona pra etapa de leitura crítica',
+    descricao: 'Tina redireciona pra etapa de leitura crítica',
     turnos: [
       '[lead enviou arquivo: livro.pdf]',
       'Pode ler meu livro e me dar um parecer?',
@@ -229,7 +229,7 @@ const SCENARIOS = {
   // --- EDGE CASES ADICIONAIS ---
   mudou_ideia: {
     nome: 'Lead muda perfil no meio (autor→editora)',
-    descricao: 'Lila replaneja triagem',
+    descricao: 'Tina replaneja triagem',
     turnos: [
       'Oi, sou autor, terminei meu livro de 250 páginas.',
       'Na verdade espera, eu represento uma editora pequena que tá publicando 5 títulos esse ano.',
@@ -242,7 +242,7 @@ const SCENARIOS = {
 
   ingles: {
     nome: 'Lead em inglês',
-    descricao: 'Lila responde em PT-BR (público é Brasil)',
+    descricao: 'Tina responde em PT-BR (público é Brasil)',
     turnos: [
       'Hi, I want to publish my novel in Brazil. Can you help?',
     ],
@@ -254,7 +254,7 @@ const SCENARIOS = {
 
   giria: {
     nome: 'Lead jovem com gíria',
-    descricao: 'Lila mantém calorosa, adapta sem virar gíria pesada',
+    descricao: 'Tina mantém calorosa, adapta sem virar gíria pesada',
     turnos: [
       'eae mano, queria publicar um livro de cordel meu, top demais',
       'ta osso pra publicar sozinho, vc topa me ajudar?',
@@ -267,7 +267,7 @@ const SCENARIOS = {
 
   preco_pressao: {
     nome: 'Lead insiste em saber preço',
-    descricao: 'Lila não inventa, mantém "time comercial passa"',
+    descricao: 'Tina não inventa, mantém "time comercial passa"',
     turnos: [
       'Quanto custa pra publicar? Me diz só o valor.',
       'Não, não quero conversar com ninguém. Só quero saber o preço.',
@@ -294,7 +294,7 @@ const SCENARIOS = {
 
   ja_cliente: {
     nome: 'Já é cliente, quer outro serviço',
-    descricao: 'Lila reconhece e qualifica pra outro serviço',
+    descricao: 'Tina reconhece e qualifica pra outro serviço',
     turnos: [
       'Oi, já contratei o Press LC mês passado pro meu primeiro livro. Agora quero divulgar mais o livro nas redes.',
       'Tenho 10k seguidores no Instagram, quero estratégia.',
@@ -307,7 +307,7 @@ const SCENARIOS = {
 
   audio_recebido: {
     nome: 'Lead manda áudio (simulado transcrito)',
-    descricao: 'Lila reconhece áudio',
+    descricao: 'Tina reconhece áudio',
     turnos: [
       '[áudio transcrito] Oi, eu sou advogado e tô finalizando meu livro sobre direito de família, queria saber sobre publicação',
     ],
@@ -390,7 +390,7 @@ async function runScenario(key, scenario) {
     for (const userMsg of scenario.turnos) {
       recordInbound(contactId, { content: userMsg });
       const fresh = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contactId);
-      const result = await generateLilaReply({ contact: fresh, incomingText: userMsg });
+      const result = await generateTinaReply({ contact: fresh, incomingText: userMsg });
 
       // Atualiza estado
       db.prepare(`

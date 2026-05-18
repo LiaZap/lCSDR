@@ -51,7 +51,7 @@ export const FUNNELS = {
 };
 
 // Detecção heurística de funil pelo texto inicial.
-// Não é 100% — a Lila refina via árvore de triagem na conversa.
+// Não é 100% — a Tina refina via árvore de triagem na conversa.
 export function detectFunnel(text = '') {
   const t = text.toLowerCase();
   if (/(divulg|imprensa|lanç|press|resenha|review|amazon|avali|mídia|midia|redes sociais|instagram|tiktok)/.test(t)) return 'divulgar';
