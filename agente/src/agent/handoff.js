@@ -6,35 +6,54 @@ import { logger } from '../utils/logger.js';
 
 const FOLLOWUP_MIN = Number(process.env.FOLLOWUP_SILENCE_MINUTES || 60);
 
-// === Etiquetas GHL (esquema real da LC) ===
+// === Etiquetas GHL — esquema "tina-*" (reunião de alinhamento LC, 18/05/2026) ===
 // Configuráveis por env — se a LC renomear uma etiqueta, ajusta a variável
-// sem mexer no código. Defaults = nomes confirmados pela Icá (mai/2026).
+// sem mexer no código.
 const TAG = {
-  closers: process.env.GHL_TAG_CLOSERS || 'funil-lca-closers',
-  quente: process.env.GHL_TAG_QUENTE || 'quente',
-  morno: process.env.GHL_TAG_MORNO || 'morno',
+  // Interesse do lead (mapeia direto do funnel detectado pela Tina)
+  escrever: process.env.GHL_TAG_ESCREVER || 'tina-escrever',
+  publicar: process.env.GHL_TAG_PUBLICAR || 'tina-publicar',
+  divulgar: process.env.GHL_TAG_DIVULGAR || 'tina-divulgar',
+  // Lead pronto pro closer (quer agendar / tem perfil de investimento)
+  agenda: process.env.GHL_TAG_AGENDA || 'tina-agenda',
+  // Dúvidas sobre curso
+  duvidaCurso: process.env.GHL_TAG_DUVIDA_CURSO || 'tina-duvida-curso',
+  duvidaCursoAluno: process.env.GHL_TAG_DUVIDA_CURSO_ALUNO || 'tina-duvida-curso-aluno',
+  // Temperatura (termômetro do lead)
   frio: process.env.GHL_TAG_FRIO || 'frio',
+  morno: process.env.GHL_TAG_MORNO || 'morno',
+  quente: process.env.GHL_TAG_QUENTE || 'quente',
+  superquente: process.env.GHL_TAG_SUPERQUENTE || 'superquente',
 };
 
-// Temperatura do lead pelo score de qualificação.
-function temperatureForScore(score) {
+// Temperatura pelo score (escala definida na reunião LC 18/05):
+//   frio 0-20 · morno 21-45 · quente 46-70 · superquente 71+ COM tina-agenda
+function temperatureForScore(score, hasAgenda = false) {
   const s = Number(score) || 0;
-  if (s >= 60) return TAG.quente;
-  if (s >= 30) return TAG.morno;
+  if (hasAgenda && s >= 71) return TAG.superquente;
+  if (s >= 46) return TAG.quente;
+  if (s >= 21) return TAG.morno;
   return TAG.frio;
 }
 
-// Sincroniza a etiqueta de temperatura no GHL.
-// Só chama a API do GHL quando a faixa MUDA (compara com contacts.ghl_temp_tag)
-// — evita spammar a API a cada turno da conversa.
-async function syncTemperatureTag(contact, score) {
-  if (!process.env.GHL_API_TOKEN) return;
-  // Contato ainda com ID sintético wa- não existe no GHL — pula
-  if (!contact.ghl_contact_id || String(contact.ghl_contact_id).startsWith('wa-')) return;
+// Mapeia o funnel da Tina pra etiqueta de interesse
+function interestTag(funnel) {
+  if (funnel === 'escrever') return TAG.escrever;
+  if (funnel === 'publicar') return TAG.publicar;
+  if (funnel === 'divulgar') return TAG.divulgar;
+  return null;
+}
 
-  const wanted = temperatureForScore(score);
+const isSyntheticId = (id) => !id || String(id).startsWith('wa-');
+
+// Sincroniza a etiqueta de temperatura no GHL.
+// Só chama a API quando a faixa MUDA (compara com contacts.ghl_temp_tag).
+async function syncTemperatureTag(contact, score, hasAgenda) {
+  if (!process.env.GHL_API_TOKEN || isSyntheticId(contact.ghl_contact_id)) return;
+
+  const wanted = temperatureForScore(score, hasAgenda);
   const current = contact.ghl_temp_tag || null;
-  if (wanted === current) return; // já está na faixa certa
+  if (wanted === current) return;
 
   try {
     if (current) {
@@ -48,11 +67,39 @@ async function syncTemperatureTag(contact, score) {
   }
 }
 
-// Chamado a cada turno enquanto o lead ainda está em qualificação (não fez
-// handoff nem foi descartado). Mantém a etiqueta de temperatura em dia.
-export async function tagLeadProgress(contact, result) {
-  await syncTemperatureTag(contact, result?.qualification_score);
+// Aplica TODAS as etiquetas tina-* no GHL conforme o resultado da Tina.
+// Chamado a cada turno pelos webhooks. Idempotente (addTag não duplica).
+//   - interesse: tina-escrever / tina-publicar / tina-divulgar (do funnel)
+//   - course_help: tina-duvida-curso / tina-duvida-curso-aluno
+//   - handoff: tina-agenda (lead pronto pro closer)
+//   - temperatura: frio / morno / quente / superquente
+export async function applyTinaTags(contact, result) {
+  if (!process.env.GHL_API_TOKEN || isSyntheticId(contact.ghl_contact_id)) return;
+  if (!result) return;
+
+  const hasAgenda = result.handoff === true || result.stage === 'qualificado';
+  const toAdd = [];
+
+  const interest = interestTag(result.funnel);
+  if (interest) toAdd.push(interest);
+
+  if (result.course_help === 'comprar') toAdd.push(TAG.duvidaCurso);
+  if (result.course_help === 'aluno') toAdd.push(TAG.duvidaCursoAluno);
+
+  if (hasAgenda) toAdd.push(TAG.agenda);
+
+  try {
+    if (toAdd.length) {
+      await GHL.addTag(contact.ghl_contact_id, toAdd);
+    }
+    await syncTemperatureTag(contact, result.qualification_score, hasAgenda);
+  } catch (err) {
+    logger.error({ err: err.message, contactId: contact.id }, 'falha ao aplicar etiquetas tina-* no GHL');
+  }
 }
+
+// Alias mantido pra compat — agora aplica o conjunto completo de etiquetas.
+export const tagLeadProgress = applyTinaTags;
 
 export function pauseIA(contactId, reason = 'sdr_assumiu') {
   db.prepare(`
@@ -96,13 +143,9 @@ export async function markQualifiedAndHandoff(contact, result) {
 
   pauseIA(contact.id, 'qualificado_pronto_pro_sdr');
 
-  // GHL: etiquetas + custom fields + oportunidade em paralelo (erro de um não trava os outros)
-  // Etiqueta funil-lca-closers = lead "passa pras closers". Temperatura = quente.
-  const tag = (async () => {
-    await syncTemperatureTag(contact, result.qualification_score);
-    await GHL.addTag(contact.ghl_contact_id, [TAG.closers]);
-  })().catch(err => logger.error({ err: err.message }, 'tag GHL (handoff) falhou'));
-
+  // As etiquetas (tina-agenda, temperatura, etc) são aplicadas pelo
+  // applyTinaTags() que o webhook chama a cada turno. Aqui só custom
+  // fields + oportunidade no GHL.
   const fields = writeQualificationFields(contact.ghl_contact_id, {
     funnel: result.funnel,
     score: result.qualification_score,
@@ -122,7 +165,7 @@ export async function markQualifiedAndHandoff(contact, result) {
     }
   });
 
-  await Promise.allSettled([tag, fields, opp]);
+  await Promise.allSettled([fields, opp]);
 }
 
 export async function markDisqualified(contact, result) {
@@ -136,16 +179,16 @@ export async function markDisqualified(contact, result) {
     WHERE id = ?
   `).run(result.qualification_score || 0, result.qualification_notes || '', contact.id);
 
+  // Etiquetas (temperatura frio, etc) são aplicadas pelo applyTinaTags()
+  // que o webhook chama a cada turno. Aqui só os custom fields.
   try {
-    // Lead descartado → temperatura frio (score baixo cai na faixa frio)
-    await syncTemperatureTag(contact, result.qualification_score);
     await writeQualificationFields(contact.ghl_contact_id, {
       funnel: result.funnel,
       score: result.qualification_score,
       notes: result.qualification_notes,
     });
   } catch (err) {
-    logger.error({ err: err.message }, 'falha ao taggear desqualificado');
+    logger.error({ err: err.message }, 'falha ao gravar custom fields do desqualificado');
   }
 }
 

@@ -9,7 +9,7 @@ import { generateTinaReply } from '../agent/tina.js';
 import { sendSequence, sendText } from '../agent/messenger.js';
 import {
   pauseIA, scheduleFollowup,
-  markQualifiedAndHandoff, markDisqualified, tagLeadProgress,
+  markQualifiedAndHandoff, markDisqualified, applyTinaTags,
 } from '../agent/handoff.js';
 import { withContactLock } from '../utils/contactLock.js';
 import { GHL } from '../ghl/client.js';
@@ -492,14 +492,15 @@ async function handleInbound(event) {
       );
     }
 
+    // Etiquetas tina-* no GHL (interesse, agenda, dúvida-curso, temperatura)
+    await applyTinaTags(fresh, result);
+
     if (result.handoff || result.stage === 'qualificado') {
       await markQualifiedAndHandoff(fresh, result);
     } else if (result.stage === 'desqualificado' || result.end_conversation) {
       await markDisqualified(fresh, result);
     } else {
       scheduleFollowup(fresh.id, 'silencio_lead');
-      // Mantém a etiqueta de temperatura do lead em dia (quente/morno/frio)
-      await tagLeadProgress(fresh, result);
     }
   });
 }

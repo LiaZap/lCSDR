@@ -47,6 +47,7 @@ const TINA_SCHEMA = {
     'reply', 'split', 'funnel', 'service_recommended',
     'stage', 'handoff', 'handoff_reason',
     'qualification_score', 'qualification_notes', 'end_conversation',
+    'course_help',
   ],
   properties: {
     reply: {
@@ -120,6 +121,11 @@ const TINA_SCHEMA = {
       description: 'Anotação curta pro humano (perfil, urgência, sinais)',
     },
     end_conversation: { type: 'boolean', description: 'true se Tina encerrou a conversa por desqualificação ou off-topic' },
+    course_help: {
+      type: 'string',
+      enum: ['nao', 'comprar', 'aluno'],
+      description: 'Dúvida sobre o curso da LC: "nao" = não é dúvida de curso. "comprar" = lead NÃO-aluno perguntando sobre o curso com interesse de comprar (vai pro SDR vender). "aluno" = lead que JÁ é aluno do curso com dúvida sobre o conteúdo (vai pro suporte cursos@lcagencia.com.br).',
+    },
   },
 };
 

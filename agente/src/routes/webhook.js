@@ -11,7 +11,7 @@ import { generateTinaReply } from '../agent/tina.js';
 import { sendSequence, sendText } from '../agent/messenger.js';
 import {
   pauseIA, scheduleFollowup, handleSDRReply,
-  markQualifiedAndHandoff, markDisqualified, tagLeadProgress,
+  markQualifiedAndHandoff, markDisqualified, applyTinaTags,
 } from '../agent/handoff.js';
 
 const router = express.Router();
@@ -189,15 +189,16 @@ async function handleInbound(event) {
     );
   }
 
-  // 8) Roteamento final
+  // 8) Etiquetas tina-* no GHL (interesse, agenda, dúvida-curso, temperatura)
+  await applyTinaTags(fresh, result);
+
+  // 9) Roteamento final
   if (result.handoff || result.stage === 'qualificado') {
     await markQualifiedAndHandoff(fresh, result);
   } else if (result.stage === 'desqualificado' || result.end_conversation) {
     await markDisqualified(fresh, result);
   } else {
     scheduleFollowup(fresh.id, 'silencio_lead');
-    // Mantém a etiqueta de temperatura do lead em dia (quente/morno/frio)
-    await tagLeadProgress(fresh, result);
   }
 }
 
