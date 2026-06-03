@@ -13,10 +13,21 @@ import {
   pauseIA, scheduleFollowup, handleSDRReply,
   markQualifiedAndHandoff, markDisqualified, applyTinaTags,
 } from '../agent/handoff.js';
+import { withContactLock } from '../utils/contactLock.js';
 
 const router = express.Router();
 const MAX_KB = Number(process.env.MAX_ATTACHMENT_KB || 200);
 const MAX_MSGS_DAY = Number(process.env.MAX_MESSAGES_PER_CONVERSATION_PER_DAY || 40);
+
+// Idempotência de webhook: GHL pode reentregar o mesmo evento mais de
+// uma vez (timeout, retry). Sem dedup, a Tina processa 2x e responde 2x.
+function alreadyProcessed(source, messageId) {
+  if (!messageId) return false;
+  const result = db.prepare(
+    'INSERT OR IGNORE INTO processed_webhook_ids (source, message_id) VALUES (?, ?)'
+  ).run(source, String(messageId));
+  return result.changes === 0; // 0 = duplicata (UNIQUE bateu)
+}
 
 // === Webhook principal do GHL ===
 // GHL → Settings → Webhooks: POST https://seu-dominio/webhook/ghl
@@ -40,6 +51,13 @@ router.post('/ghl', async (req, res) => {
   res.status(200).json({ ok: true });
 
   try {
+    // Dedup: se o GHL reentregar o mesmo message_id, ignora silenciosamente
+    const msgId = event.messageId || event.id;
+    if ((kind === 'InboundMessage' || kind === 'OutboundMessage') && alreadyProcessed('ghl', msgId)) {
+      logger.info({ kind, messageId: msgId }, 'webhook GHL: evento duplicado, ignorando');
+      return;
+    }
+
     if (kind === 'InboundMessage') {
       await handleInbound(event);
     } else if (kind === 'OutboundMessage') {
@@ -143,63 +161,71 @@ async function handleInbound(event) {
     attachment_url,
   });
 
-  // 3) Se IA está pausada (SDR assumiu), só registra
-  const fresh = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id);
-  if (fresh.ai_paused) {
-    logger.info({ contactId: contact.id }, 'IA pausada, registrando sem responder');
-    scheduleFollowup(contact.id, 'silencio_sdr');
-    return;
-  }
+  // === Lock por contato ===
+  // Serializa LLM call + send + update por contactId. Sem isso, 2 mensagens
+  // do mesmo lead em < 1s rodam 2 chamadas LLM paralelas que leem o mesmo
+  // histórico e respondem coisas conflitantes (resposta duplicada).
+  await withContactLock(contact.id, async () => {
+    // Re-lê dentro do lock — estado pode ter mudado enquanto esperava
+    const fresh = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id);
+    if (!fresh) return;
 
-  // 4) Proteção de custo
-  if (countMessagesToday(contact.id) > MAX_MSGS_DAY) {
-    logger.warn({ contactId: contact.id }, 'limite diário atingido, pausando IA');
-    pauseIA(contact.id, 'limite_mensagens_dia');
-    return;
-  }
+    // 3) Se IA está pausada (SDR assumiu), só registra
+    if (fresh.ai_paused) {
+      logger.info({ contactId: contact.id }, 'IA pausada, registrando sem responder');
+      scheduleFollowup(contact.id, 'silencio_sdr');
+      return;
+    }
 
-  // 5) Gera resposta da Tina
-  const result = await generateTinaReply({ contact: fresh, incomingText: content });
+    // 4) Proteção de custo
+    if (countMessagesToday(contact.id) > MAX_MSGS_DAY) {
+      logger.warn({ contactId: contact.id }, 'limite diário atingido, pausando IA');
+      pauseIA(contact.id, 'limite_mensagens_dia');
+      return;
+    }
 
-  // 6) Envia resposta(s) — canal escolhido pelo messenger (uazapi se UAZAPI_TOKEN setado, senão GHL)
-  const items = result.split && result.split.length ? result.split : [result.reply];
-  await sendSequence(fresh, items);
-  // Persiste o que foi enviado no log local
-  for (const item of items) {
-    const txt = typeof item === 'string' ? item : (item?.text || '');
-    if (txt) recordOutbound(fresh.id, { author: 'ia', content: txt, usage: result.usage });
-  }
+    // 5) Gera resposta da Tina
+    const result = await generateTinaReply({ contact: fresh, incomingText: content });
 
-  // 7) Atualiza estado do contato
-  if (result.funnel || result.stage) {
-    db.prepare(`
-      UPDATE contacts
-      SET funnel = COALESCE(?, funnel),
-          stage = COALESCE(?, stage),
-          qualification_score = ?,
-          qualification_notes = COALESCE(?, qualification_notes),
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(
-      result.funnel || null,
-      result.stage || null,
-      result.qualification_score || fresh.qualification_score || 0,
-      result.qualification_notes || null,
-      fresh.id
-    );
-  }
+    // 6) Envia resposta(s) — canal escolhido pelo messenger
+    const items = result.split && result.split.length ? result.split : [result.reply];
+    await sendSequence(fresh, items);
+    for (const item of items) {
+      const txt = typeof item === 'string' ? item : (item?.text || '');
+      if (txt) recordOutbound(fresh.id, { author: 'ia', content: txt, usage: result.usage });
+    }
 
-  // 8) Etiquetas tina-* no GHL (interesse, agenda, dúvida-curso, temperatura)
-  await applyTinaTags(fresh, result);
+    // 7) Atualiza estado do contato
+    if (result.funnel || result.stage) {
+      db.prepare(`
+        UPDATE contacts
+        SET funnel = COALESCE(?, funnel),
+            stage = COALESCE(?, stage),
+            qualification_score = ?,
+            qualification_notes = COALESCE(?, qualification_notes),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        result.funnel || null,
+        result.stage || null,
+        result.qualification_score || fresh.qualification_score || 0,
+        result.qualification_notes || null,
+        fresh.id
+      );
+    }
 
-  // 9) Roteamento final
-  if (result.handoff || result.stage === 'qualificado') {
-    await markQualifiedAndHandoff(fresh, result);
-  } else if (result.stage === 'desqualificado' || result.end_conversation) {
-    await markDisqualified(fresh, result);
-  } else {
-    scheduleFollowup(fresh.id, 'silencio_lead');
-  }
+    // 8) Etiquetas tina-* no GHL (interesse, agenda, dúvida-curso, temperatura)
+    await applyTinaTags(fresh, result);
+
+    // 9) Roteamento final
+    if (result.handoff || result.stage === 'qualificado') {
+      await markQualifiedAndHandoff(fresh, result);
+    } else if (result.stage === 'desqualificado' || result.end_conversation) {
+      await markDisqualified(fresh, result);
+    } else {
+      scheduleFollowup(fresh.id, 'silencio_lead');
+    }
+  });
 }
 
 function mapMessageType(incoming) {
