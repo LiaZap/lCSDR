@@ -40,12 +40,31 @@ router.post('/ghl', async (req, res) => {
     return res.status(401).json({ error: 'invalid signature' });
   }
 
-  const event = req.body || {};
+  const rawBody = req.body || {};
+
+  // GHL Workflow webhook tem 2 formatos possíveis:
+  //   1. Flat: { type, contactId, body, ... }
+  //   2. Custom Data aninhado: { contact: {...}, customData: { type, contactId, body, ... } }
+  // Fazemos merge dos 2 — o customData tem prioridade.
+  const customData = rawBody.customData || {};
+  const event = {
+    ...rawBody,
+    ...customData,
+    // Dados do contato podem vir em rawBody.contact.* ou no nível raiz
+    contactId: customData.contactId || rawBody.contactId || rawBody.contact_id || rawBody.contact?.id || rawBody.id,
+  };
+
   const kind = event.type || event.event || 'unknown';
-  logger.info({ kind, contactId: event.contactId, id: event.messageId || event.id }, '[webhook GHL]');
+
+  // Log mais verboso: se kind=unknown, mostra o body completo pra debug
+  if (kind === 'unknown') {
+    logger.warn({ rawBody, customData }, '[webhook GHL] kind=unknown — body completo pra debug');
+  } else {
+    logger.info({ kind, contactId: event.contactId, id: event.messageId || event.id }, '[webhook GHL]');
+  }
 
   db.prepare('INSERT INTO events_log (kind, payload) VALUES (?, ?)')
-    .run(`webhook_${kind}`, JSON.stringify(event).slice(0, 8000));
+    .run(`webhook_${kind}`, JSON.stringify(rawBody).slice(0, 8000));
 
   // 2) Responder rápido (GHL tem timeout ~10s). Processa assíncrono.
   res.status(200).json({ ok: true });
