@@ -1,4 +1,4 @@
-// Base de conhecimento da Tina — fonte única de verdade sobre Grupo LC.
+// Base de conhecimento da Tina, fonte única de verdade sobre Grupo LC.
 // Mantenha este arquivo atualizado quando produtos/preços/links mudarem.
 // Extraído de: docs/source-material/01-lila-treinamento-completo.md
 //              docs/source-material/02-manual-servicos-triagem.md
@@ -15,7 +15,7 @@ export const GRUPO_LC = {
     autores_impactados: '100.000+',
   },
   empresas: [
-    { nome: 'LC – Agência de Comunicação', tipo: 'agência', site: 'lcagencia.com.br' },
+    { nome: 'LC Agência de Comunicação', tipo: 'agência', site: 'lcagencia.com.br' },
     { nome: 'LC Books Editora', tipo: 'editora autopublicação', site: 'lcbookseditora.com.br' },
     { nome: 'Lilian Cardoso (cursos/mentorias)', tipo: 'PF', site: 'liliancardoso.com.br' },
   ],
@@ -94,7 +94,7 @@ export const SERVICOS = {
   mentoria_individual: {
     fase: 'escrever',
     nome: 'Mentoria de Escrita Individual',
-    descricao: 'Acompanhamento individual com Lilian. Vagas limitadas — sempre consultar disponibilidade.',
+    descricao: 'Acompanhamento individual com Lilian. Vagas limitadas, sempre consultar disponibilidade.',
     ticket_publico: false,
     obs: 'consultar vagas com a equipe; orçamento individual',
   },
@@ -142,7 +142,7 @@ export const SERVICOS = {
   // ============================================================
   master_lc: {
     fase: 'divulgar',
-    nome: 'Master LC – Assessoria de Imprensa',
+    nome: 'Master LC Assessoria de Imprensa',
     descricao: 'Serviço mais completo. Cobertura na grande mídia (Globo, CNN, Folha, Veja, podcasts, rádios). Releases, pautas, follow-up com veículos, intermédio de entrevistas, branded content, clipping mensal.',
     site: 'https://lcagencia.com.br/assessoria-de-imprensa/',
     duracao_minima: '3 meses',
@@ -152,7 +152,7 @@ export const SERVICOS = {
   },
   press_lc: {
     fase: 'divulgar',
-    nome: 'Press LC – Assessoria de Imprensa',
+    nome: 'Press LC Assessoria de Imprensa',
     descricao: 'Versão mais acessível. 6 semanas de divulgação focada em blogs literários, bookstagrammers, podcasts, jornais, portais e rádios. Equipe lê o livro, cria release, executa campanhas e entrega clipagem final.',
     site: 'https://presslc.com',
     duracao: '6 semanas',
@@ -166,7 +166,7 @@ export const SERVICOS = {
     descricao: 'Clube de leitura LC com 20-30 influenciadores literários selecionados (bookstagrammers, booktokers, blogueiros). Eles leem, debatem (com autor), resenham e avaliam na Amazon.',
     site: 'https://lcagencia.com.br/leitura-coletiva/',
     duracao: '3 meses',
-    importante: 'Influenciadores têm liberdade total de notas — LC NÃO garante nota mínima (transparência desde o início)',
+    importante: 'Influenciadores têm liberdade total de notas, LC NÃO garante nota mínima (transparência desde o início)',
     ticket_publico: false,
     quando_recomendar: ['quer resenhas e avaliações Amazon', 'quer aparecer em bookstagram/booktok', 'networking com influenciadores literários'],
   },
@@ -218,18 +218,18 @@ export const PRECOS_PUBLICOS = {
 // === Triagem por árvore de decisão ===
 // Esta é a sequência exata que a Tina usa pra identificar serviço certo.
 export const TRIAGEM = `
-PERGUNTA 1 — Você é AUTOR (escritor) ou representa uma EDITORA?
+PERGUNTA 1: Você é AUTOR (escritor) ou representa uma EDITORA?
   → EDITORA: encaminhar pra closer (Assessoria e Consultoria para Editoras)
   → AUTOR: ir pra pergunta 2
 
-PERGUNTA 2 (autor) — Seu livro JÁ ESTÁ PUBLICADO ou ainda é manuscrito?
+PERGUNTA 2 (autor): Seu livro JÁ ESTÁ PUBLICADO ou ainda é manuscrito?
   → MANUSCRITO:
       • Quer melhorar o texto antes de publicar? → Leitura Crítica
       • Quer aprender a escrever e publicar?     → Mentoria Arquitetos OU Cursos
       • Quer produzir o livro (capa/diagramação/revisão)? → LC Books Editora
   → PUBLICADO: ir pra pergunta 3
 
-PERGUNTA 3 (publicado) — Busca DIVULGAÇÃO NA MÍDIA ou ESTRATÉGIA DE REDES SOCIAIS?
+PERGUNTA 3 (publicado): Busca DIVULGAÇÃO NA MÍDIA ou ESTRATÉGIA DE REDES SOCIAIS?
   → MÍDIA:
       • Cobertura na grande mídia (Globo/CNN/Folha)? → Master LC
       • Foco blogs/influenciadores literários?       → Press LC
@@ -238,7 +238,7 @@ PERGUNTA 3 (publicado) — Busca DIVULGAÇÃO NA MÍDIA ou ESTRATÉGIA DE REDES 
       • Estratégia + criar conteúdo com templates? → Consultoria com Plano de Marketing
       • Estratégia + posts/imagens PRONTOS?         → Consultoria + Criativos LC
 
-PERGUNTA 4 (complementar) — Tem SITE pro livro/obra?
+PERGUNTA 4 (complementar): Tem SITE pro livro/obra?
   → NÃO: oferecer Desenvolvimento de Sites como complemento
 `.trim();
 
