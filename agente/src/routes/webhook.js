@@ -104,6 +104,12 @@ async function handleContactCreate(event) {
   }
 }
 
+// Tag de WHITELIST: só atende contatos com essa tag (durante teste pra
+// não atropelar produção). Em produção, setar GHL_TAG_REQUIRED=false ou
+// vazio pra desabilitar a whitelist (Tina passa a atender todos).
+const REQUIRED_TAG = (process.env.GHL_TAG_REQUIRED ?? 'tina-liberada').toLowerCase();
+const REQUIRED_TAG_ENABLED = REQUIRED_TAG && REQUIRED_TAG !== 'false' && REQUIRED_TAG !== '';
+
 // Tag que, se presente no contato GHL, faz a Tina NÃO responder.
 // Plano A (manual): time aplica/remove a tag pra pausar/reativar.
 // Plano B (automático): o checkHumanResponded() abaixo detecta SDR respondendo
@@ -118,26 +124,69 @@ function extractTags(ghlContact) {
 // DETECÇÃO AUTOMÁTICA DE HUMANO RESPONDENDO
 // GHL não tem trigger nativo de "Outbound Message Sent", então antes da Tina
 // responder, perguntamos pro GHL: a última mensagem outbound da conversa foi
-// enviada por um humano (tem userId) ou pela API (sem userId)?
-// Se foi humano → pausa a Tina automaticamente, sem depender do time.
-async function lastOutboundWasHuman(ghlContactId) {
+// enviada por um humano (tem userId)?
+//
+// ATENÇÃO — fail mode catastrófico se mal calibrado:
+//   Se o PIT do GHL atribui userId em todas as mensagens enviadas via API
+//   (alguns tokens fazem isso), a Tina classifica a PRÓPRIA resposta como
+//   "humano" e pausa SOZINHA logo após mandar a primeira mensagem.
+//
+// Por isso, esta detecção é OFF por padrão e tem 2 sanity checks:
+//   1. AUTO_HUMAN_DETECTION_ENABLED=true no env pra ativar
+//   2. O userId tem que bater com um SDR conhecido em sdr_users.ghl_user_id
+//      (cruzamento com nossa base; se não bate, assume API e não pausa)
+//   3. A mensagem outbound do GHL tem que ser mais nova que o nosso
+//      contacts.last_outbound_at (com tolerância de 5s), senão foi nossa
+const AUTO_HUMAN_DETECTION = process.env.AUTO_HUMAN_DETECTION_ENABLED === 'true';
+
+function isKnownSdrUserId(userId) {
+  if (!userId) return false;
+  const row = db.prepare('SELECT id FROM sdr_users WHERE ghl_user_id = ?').get(String(userId));
+  return Boolean(row);
+}
+
+async function lastOutboundWasHuman(ghlContactId, localContact) {
+  if (!AUTO_HUMAN_DETECTION) return false;
   if (!process.env.GHL_API_TOKEN) return false;
   try {
     const convResp = await GHL.searchConversations(ghlContactId);
     const conv = convResp?.conversations?.[0] || convResp?.[0];
     if (!conv?.id) return false;
     const msgsResp = await GHL.getMessages(conv.id, { limit: 10 });
-    const msgs = msgsResp?.messages?.messages || msgsResp?.messages || msgsResp || [];
+    let msgs = msgsResp?.messages?.messages || msgsResp?.messages || msgsResp || [];
     if (!Array.isArray(msgs) || !msgs.length) return false;
-    // Mensagens vêm geralmente em ordem decrescente (mais recente primeiro).
-    // Procura a primeira outbound. Se tem userId → humano.
-    const lastOut = msgs.find(m => {
-      const dir = (m.direction || '').toLowerCase();
-      return dir === 'outbound';
+
+    // Ordena por dateAdded/createdAt desc client-side pra não depender da API
+    msgs = [...msgs].sort((a, b) => {
+      const da = new Date(a.dateAdded || a.createdAt || a.date || 0).getTime();
+      const db_ = new Date(b.dateAdded || b.createdAt || b.date || 0).getTime();
+      return db_ - da;
     });
+
+    const lastOut = msgs.find(m => (m.direction || '').toLowerCase() === 'outbound');
     if (!lastOut) return false;
+
     const userId = lastOut.userId || lastOut.user_id || lastOut.sentBy?.id;
-    return Boolean(userId);
+    if (!userId) return false; // sem userId → API → Tina, não humano
+
+    // Sanity 1: userId conhecido em sdr_users?
+    // (Se não bate, é provavelmente o PIT da API com algum userId fantasma.)
+    if (!isKnownSdrUserId(userId)) {
+      logger.debug({ userId }, 'userId outbound não bate com nenhum SDR conhecido — assumindo API');
+      return false;
+    }
+
+    // Sanity 2: outbound do GHL é mais nova que nossa última outbound?
+    // Se o timestamp do GHL é igual/menor ao nosso last_outbound_at + 5s,
+    // foi a Tina mesmo que enviou.
+    if (localContact?.last_outbound_at) {
+      const ghlTs = new Date(lastOut.dateAdded || lastOut.createdAt || 0).getTime();
+      const localTs = new Date(localContact.last_outbound_at).getTime();
+      if (ghlTs <= localTs + 5_000) {
+        return false;
+      }
+    }
+    return true;
   } catch (err) {
     logger.warn({ err: err.message, ghlContactId }, 'falha checando última mensagem; segue sem pausar');
     return false;
@@ -157,8 +206,16 @@ async function handleInbound(event) {
     ghlContact = { id: ghlContactId };
   }
 
-  // 1.5) Checa tag de pausa manual (Plano A) — time aplicou tag pra assumir
   const tags = extractTags(ghlContact);
+
+  // 1.4) WHITELIST: durante teste/staging, Tina só atende quem TEM a tag tina-liberada.
+  // Sem essa verificação, qualquer lead importado no GHL recebe resposta automática.
+  if (REQUIRED_TAG_ENABLED && !tags.includes(REQUIRED_TAG)) {
+    logger.info({ ghlContactId, required: REQUIRED_TAG }, 'contato sem tag de liberação, Tina não responde');
+    return;
+  }
+
+  // 1.5) Checa tag de pausa manual (Plano A) — time aplicou tag pra assumir
   if (tags.includes(PAUSE_TAG)) {
     logger.info({ ghlContactId, tag: PAUSE_TAG }, 'tag de pausa presente, Tina não responde');
     return;
@@ -167,18 +224,12 @@ async function handleInbound(event) {
   const contact = upsertContactFromGHL(ghlContact);
 
   // 1.6) DETECÇÃO AUTOMÁTICA (Plano B) — verifica se humano respondeu pelo GHL
-  // antes da Tina. Se sim, pausa sozinha + cancela follow-ups + marca
-  // tina-transferida. Sem precisar de tag manual nem botão.
-  if (await lastOutboundWasHuman(ghlContactId)) {
+  // antes da Tina. Default OFF (env AUTO_HUMAN_DETECTION_ENABLED=true pra ligar).
+  // Tem sanity checks contra falso positivo do PIT — ver lastOutboundWasHuman.
+  if (await lastOutboundWasHuman(ghlContactId, contact)) {
     logger.info({ ghlContactId, contactId: contact.id }, 'humano respondeu pelo GHL, pausando Tina automaticamente');
     handleSDRReply(contact.id, null);
-    // Registra a mensagem inbound mesmo assim pra histórico
-    recordInbound(contact.id, {
-      content: event.body || event.message || '',
-      content_type: 'text',
-      ghl_message_id: event.messageId || event.id,
-    });
-    return;
+    return; // recordInbound será feito pelo handler comum no próximo ciclo
   }
 
   // 2) Classifica tipo de mensagem (texto, áudio, imagem, PDF)
@@ -299,7 +350,17 @@ async function handleInbound(event) {
     await applyTinaTags(fresh, result);
 
     // 9) Roteamento final
-    if (result.handoff || result.stage === 'qualificado') {
+    // CASO ESPECIAL: aluno com dúvida de curso NÃO é "desqualificado".
+    // Só pausa a IA e marca stage = handoff (suporte do curso assume via email).
+    if (result.course_help === 'aluno' && result.end_conversation) {
+      db.prepare(`
+        UPDATE contacts SET ai_paused = 1, ai_paused_at = CURRENT_TIMESTAMP,
+          stage = 'handoff', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(fresh.id);
+      db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'handoff_aluno', ?)`)
+        .run(fresh.id, JSON.stringify({ to: 'cursos@lcagencia.com.br' }));
+    } else if (result.handoff || result.stage === 'qualificado') {
       await markQualifiedAndHandoff(fresh, result);
     } else if (result.stage === 'desqualificado' || result.end_conversation) {
       await markDisqualified(fresh, result);

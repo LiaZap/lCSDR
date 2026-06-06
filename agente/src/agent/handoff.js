@@ -72,6 +72,7 @@ async function syncTemperatureTag(contact, score, hasAgenda) {
 // Aplica TODAS as etiquetas tina-* no GHL conforme o resultado da Tina.
 // Chamado a cada turno pelos webhooks. Idempotente (addTag não duplica).
 //   - interesse: tina-escrever / tina-publicar / tina-divulgar (do funnel)
+//     → MUTUAMENTE EXCLUSIVAS: muda funnel → remove anteriores antes
 //   - course_help: tina-duvida-curso / tina-duvida-curso-aluno
 //   - handoff: tina-agenda (lead pronto pro closer)
 //   - temperatura: frio / morno / quente / superquente
@@ -81,9 +82,15 @@ export async function applyTinaTags(contact, result) {
 
   const hasAgenda = result.handoff === true || result.stage === 'qualificado';
   const toAdd = [];
+  const toRemove = [];
 
+  // Tags de interesse: mutuamente exclusivas — se mudou de funnel, remove as outras
   const interest = interestTag(result.funnel);
-  if (interest) toAdd.push(interest);
+  if (interest) {
+    toAdd.push(interest);
+    const allInterest = [TAG.escrever, TAG.publicar, TAG.divulgar];
+    allInterest.filter(t => t !== interest).forEach(t => toRemove.push(t));
+  }
 
   if (result.course_help === 'comprar') toAdd.push(TAG.duvidaCurso);
   if (result.course_help === 'aluno') toAdd.push(TAG.duvidaCursoAluno);
@@ -93,6 +100,10 @@ export async function applyTinaTags(contact, result) {
   try {
     if (toAdd.length) {
       await GHL.addTag(contact.ghl_contact_id, toAdd);
+    }
+    // Remove tags de interesse antigas (defesa contra mudança de funil)
+    if (toRemove.length) {
+      await GHL.removeTag(contact.ghl_contact_id, toRemove).catch(() => {});
     }
     await syncTemperatureTag(contact, result.qualification_score, hasAgenda);
   } catch (err) {

@@ -29,13 +29,16 @@ async function processFollowups() {
       // não vai disparar duplicado.
       db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(f.contact_id);
 
-      // Se já foi desqualificado ou agendado, ignora
-      if (['desqualificado', 'agendado'].includes(f.stage)) {
+      // Se já foi desqualificado, agendado, qualificado (handoff feito) ou
+      // está em handoff, NÃO manda follow-up. Risco era a Tina mandar
+      // "dei uma sumida" pra lead que o Closer humano está atendendo.
+      if (['desqualificado', 'agendado', 'qualificado', 'handoff'].includes(f.stage)) {
         continue;
       }
 
-      // Se IA estava pausada (SDR assumiu), retoma antes de mandar
-      if (f.ai_paused) resumeIA(f.contact_id, f.reason);
+      // Defesa em camadas: se a IA está pausada (qualquer motivo), nem retoma.
+      // Só caminho legítimo de follow-up é silencio_lead com IA não-pausada.
+      if (f.ai_paused) continue;
 
       const nome = (f.name || '').split(' ')[0];
       const saudacao = nome ? `Oi ${nome}, ` : 'Oi, ';
