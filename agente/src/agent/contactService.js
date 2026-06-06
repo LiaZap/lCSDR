@@ -39,6 +39,9 @@ export function recordInbound(contactId, { content, content_type = 'text', ghl_m
     VALUES (?, ?, 'inbound', 'lead', ?, ?, ?)
   `).run(contactId, ghl_message_id, content, content_type, attachment_url);
   db.prepare('UPDATE contacts SET last_inbound_at = CURRENT_TIMESTAMP WHERE id = ?').run(contactId);
+  // Lead respondeu → cancela follow-ups pendentes desse contato.
+  // Não faz sentido mandar "dei uma sumida" pra quem acabou de falar.
+  db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(contactId);
 }
 
 export function recordOutbound(contactId, { author = 'ia', content, sdr_id = null, usage = {} }) {

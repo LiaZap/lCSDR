@@ -124,6 +124,11 @@ export function resumeIA(contactId, reason = 'silencio_humano') {
 }
 
 export function scheduleFollowup(contactId, reason = 'silencio_lead', minutesFromNow = FOLLOWUP_MIN) {
+  // CANCELA follow-ups pendentes antigos do mesmo contato antes de criar novo.
+  // Sem isso, cada turno da conversa criava um follow-up novo. Quando o primeiro
+  // vence (1h), TODOS os outros já estão vencidos também e disparam juntos
+  // → o lead recebe a mesma mensagem 5x.
+  db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(contactId);
   const due = new Date(Date.now() + minutesFromNow * 60_000).toISOString();
   db.prepare(`
     INSERT INTO followups (contact_id, due_at, reason) VALUES (?, ?, ?)
