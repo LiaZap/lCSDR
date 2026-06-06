@@ -104,17 +104,34 @@ async function handleContactCreate(event) {
   }
 }
 
+// Tag que, se presente no contato GHL, faz a Tina NÃO responder.
+// Time aplica essa tag quando vai assumir o atendimento manual pelo GHL.
+// Remove a tag quando terminar pra a Tina voltar a responder novos leads.
+const PAUSE_TAG = (process.env.GHL_TAG_PAUSAR_TINA || 'tina-pausada').toLowerCase();
+
+function extractTags(ghlContact) {
+  const raw = ghlContact?.tags || [];
+  return raw.map(t => (typeof t === 'string' ? t : (t?.name || ''))).map(s => s.toLowerCase()).filter(Boolean);
+}
+
 async function handleInbound(event) {
   const ghlContactId = event.contactId || event.contact_id;
   if (!ghlContactId) return;
 
-  // 1) Hydrata contato do GHL (pega nome, phone, email)
+  // 1) Hydrata contato do GHL (pega nome, phone, email, TAGS)
   let ghlContact;
   try {
     ghlContact = await GHL.getContact(ghlContactId);
   } catch (err) {
     logger.error({ err: err.message, ghlContactId }, 'não consegui buscar contato no GHL');
     ghlContact = { id: ghlContactId };
+  }
+
+  // 1.5) Checa tag de pausa — time já está atendendo pelo GHL, Tina não responde
+  const tags = extractTags(ghlContact);
+  if (tags.includes(PAUSE_TAG)) {
+    logger.info({ ghlContactId, tag: PAUSE_TAG }, 'tag de pausa presente, Tina não responde');
+    return;
   }
 
   const contact = upsertContactFromGHL(ghlContact);
