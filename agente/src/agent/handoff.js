@@ -24,6 +24,8 @@ const TAG = {
   morno: process.env.GHL_TAG_MORNO || 'morno',
   quente: process.env.GHL_TAG_QUENTE || 'quente',
   superquente: process.env.GHL_TAG_SUPERQUENTE || 'superquente',
+  // Marcação quando SDR humano assume a conversa
+  transferida: process.env.GHL_TAG_TRANSFERIDA || 'tina-transferida',
 };
 
 // Temperatura pelo score (escala definida na reunião LC 18/05):
@@ -208,7 +210,8 @@ export async function markDisqualified(contact, result) {
 }
 
 // Chamado quando detectamos no webhook que um SDR humano respondeu direto no GHL.
-// Pausa a IA na hora e agenda retomada caso o lead fique no vácuo.
+// Pausa a IA na hora. Marca tag tina-transferida pra rastreio + cancela
+// follow-ups pendentes (não queremos a Tina voltando depois que humano assumiu).
 export function handleSDRReply(contactId, sdrId = null) {
   db.prepare(`
     UPDATE contacts
@@ -220,4 +223,14 @@ export function handleSDRReply(contactId, sdrId = null) {
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(sdrId, contactId);
+
+  // Cancela follow-ups pendentes — humano está conversando, Tina não deve voltar
+  db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(contactId);
+
+  // Marca tag tina-transferida no GHL pra rastreio do time
+  const contact = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contactId);
+  if (contact && contact.ghl_contact_id && !String(contact.ghl_contact_id).startsWith('wa-') && process.env.GHL_API_TOKEN) {
+    GHL.addTag(contact.ghl_contact_id, [TAG.transferida])
+      .catch(err => logger.error({ err: err.message, contactId }, 'falha ao marcar tina-transferida no GHL'));
+  }
 }
