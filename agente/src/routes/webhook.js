@@ -105,13 +105,43 @@ async function handleContactCreate(event) {
 }
 
 // Tag que, se presente no contato GHL, faz a Tina NÃO responder.
-// Time aplica essa tag quando vai assumir o atendimento manual pelo GHL.
-// Remove a tag quando terminar pra a Tina voltar a responder novos leads.
+// Plano A (manual): time aplica/remove a tag pra pausar/reativar.
+// Plano B (automático): o checkHumanResponded() abaixo detecta SDR respondendo
+// e pausa sozinho.
 const PAUSE_TAG = (process.env.GHL_TAG_PAUSAR_TINA || 'tina-pausada').toLowerCase();
 
 function extractTags(ghlContact) {
   const raw = ghlContact?.tags || [];
   return raw.map(t => (typeof t === 'string' ? t : (t?.name || ''))).map(s => s.toLowerCase()).filter(Boolean);
+}
+
+// DETECÇÃO AUTOMÁTICA DE HUMANO RESPONDENDO
+// GHL não tem trigger nativo de "Outbound Message Sent", então antes da Tina
+// responder, perguntamos pro GHL: a última mensagem outbound da conversa foi
+// enviada por um humano (tem userId) ou pela API (sem userId)?
+// Se foi humano → pausa a Tina automaticamente, sem depender do time.
+async function lastOutboundWasHuman(ghlContactId) {
+  if (!process.env.GHL_API_TOKEN) return false;
+  try {
+    const convResp = await GHL.searchConversations(ghlContactId);
+    const conv = convResp?.conversations?.[0] || convResp?.[0];
+    if (!conv?.id) return false;
+    const msgsResp = await GHL.getMessages(conv.id, { limit: 10 });
+    const msgs = msgsResp?.messages?.messages || msgsResp?.messages || msgsResp || [];
+    if (!Array.isArray(msgs) || !msgs.length) return false;
+    // Mensagens vêm geralmente em ordem decrescente (mais recente primeiro).
+    // Procura a primeira outbound. Se tem userId → humano.
+    const lastOut = msgs.find(m => {
+      const dir = (m.direction || '').toLowerCase();
+      return dir === 'outbound';
+    });
+    if (!lastOut) return false;
+    const userId = lastOut.userId || lastOut.user_id || lastOut.sentBy?.id;
+    return Boolean(userId);
+  } catch (err) {
+    logger.warn({ err: err.message, ghlContactId }, 'falha checando última mensagem; segue sem pausar');
+    return false;
+  }
 }
 
 async function handleInbound(event) {
@@ -127,7 +157,7 @@ async function handleInbound(event) {
     ghlContact = { id: ghlContactId };
   }
 
-  // 1.5) Checa tag de pausa — time já está atendendo pelo GHL, Tina não responde
+  // 1.5) Checa tag de pausa manual (Plano A) — time aplicou tag pra assumir
   const tags = extractTags(ghlContact);
   if (tags.includes(PAUSE_TAG)) {
     logger.info({ ghlContactId, tag: PAUSE_TAG }, 'tag de pausa presente, Tina não responde');
@@ -135,6 +165,21 @@ async function handleInbound(event) {
   }
 
   const contact = upsertContactFromGHL(ghlContact);
+
+  // 1.6) DETECÇÃO AUTOMÁTICA (Plano B) — verifica se humano respondeu pelo GHL
+  // antes da Tina. Se sim, pausa sozinha + cancela follow-ups + marca
+  // tina-transferida. Sem precisar de tag manual nem botão.
+  if (await lastOutboundWasHuman(ghlContactId)) {
+    logger.info({ ghlContactId, contactId: contact.id }, 'humano respondeu pelo GHL, pausando Tina automaticamente');
+    handleSDRReply(contact.id, null);
+    // Registra a mensagem inbound mesmo assim pra histórico
+    recordInbound(contact.id, {
+      content: event.body || event.message || '',
+      content_type: 'text',
+      ghl_message_id: event.messageId || event.id,
+    });
+    return;
+  }
 
   // 2) Classifica tipo de mensagem (texto, áudio, imagem, PDF)
   //    GHL envia em `messageType` (WhatsApp/SMS/Email/FB/IG/GMB) e conteúdo em `body` + `attachments`.
