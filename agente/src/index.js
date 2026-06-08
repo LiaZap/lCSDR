@@ -9,6 +9,7 @@ import webhookUazapiRoutes from './routes/webhookUazapi.js';
 import authRoutes from './routes/auth.js';
 import dashboardRoutes from './routes/dashboard.js';
 import playgroundRoutes from './routes/playground.js';
+import internalRoutes from './routes/internal.js';
 import { startScheduler } from './scheduler.js';
 import { captureRawBody } from './ghl/webhookSig.js';
 import { refreshCustomFieldsCache } from './ghl/customFields.js';
@@ -96,6 +97,7 @@ app.use('/webhook', webhookRoutes);
 app.use('/webhook', webhookUazapiRoutes);
 app.use('/auth', authRoutes);
 app.use('/api/playground', playgroundRoutes);
+app.use('/api/internal', internalRoutes);
 app.use('/api', dashboardRoutes);
 
 app.use((err, req, res, _next) => {
