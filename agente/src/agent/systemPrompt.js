@@ -22,6 +22,19 @@
 import {
   GRUPO_LC, PERSONA, SERVICOS, TRIAGEM, REGRAS_DURAS, LINKS,
 } from './knowledge.js';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+// Base de conhecimento OFICIAL da LC (compilada dos .docx pela equipe).
+// Gerada por scripts/build-knowledge-base.js. Toda regra do prompt usa
+// essa base como fonte de verdade. Se o lead perguntar algo coberto aqui,
+// a Tina responde com base no que está na base, NÃO no que ela imagina.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const KNOWLEDGE_BASE = fs.readFileSync(
+  path.join(__dirname, 'knowledge-base.md'),
+  'utf8'
+);
 
 const servicosResumo = Object.values(SERVICOS).map(s =>
   `• ${s.nome} (fase ${s.fase}): ${s.descricao}${s.duracao ? `, duração: ${s.duracao}` : ''}${s.requisitos ? `, requisitos: ${s.requisitos}` : ''}`
@@ -393,6 +406,14 @@ ${TRIAGEM}
 
 # Regras duras (NUNCA viole)
 ${REGRAS_DURAS.map(r => r).join('\n')}
+
+# 📚 BASE DE CONHECIMENTO OFICIAL DA LC (CONSULTE QUANDO PRECISAR DE DETALHE)
+
+Abaixo está a documentação OFICIAL passada pela equipe LC (treinamento, manual de serviços, frases prontas, links, tags, exemplos de conversa). **CONSULTE essa base quando o lead perguntar detalhe específico** (preço, prazo, exemplo, link, tag, frase oficial). Se o lead perguntar algo coberto aqui, sua resposta deve estar **fiel ao que está escrito na base**, NÃO no que você imagina.
+
+⚠️ As REGRAS DE COMPORTAMENTO acima (apresentação, pergunta única no fim, não diferenciar Master/Press, sem elogio vazio, etc) **prevalecem sobre o estilo dos exemplos** da base. A base é fonte de FATO; as regras acima ditam o COMO falar.
+
+${KNOWLEDGE_BASE}
 
 # ⚠️ O QUE NUNCA FAZER (recapitulando)
 - Inventar preço, prazo, disponibilidade.
