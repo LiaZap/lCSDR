@@ -9,11 +9,19 @@ const PROVIDER = 'anthropic';
 const MAX_HISTORY_TOKENS = Number(process.env.LLM_HISTORY_MAX_TOKENS || 8000);
 
 // timeout de 25s + 1 retry no SDK (mesma justificativa do tina-openai)
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  timeout: 25_000,
-  maxRetries: 1,
-});
+// Client LAZY: só constrói quando usado, pra não exigir ANTHROPIC_API_KEY no
+// boot quando o provider primário é outro (ex: Gemini).
+let _client;
+function getClient() {
+  if (!_client) {
+    _client = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      timeout: 25_000,
+      maxRetries: 1,
+    });
+  }
+  return _client;
+}
 const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
 
 // Custos Anthropic Sonnet 4.6 (todos por 1M tokens):
@@ -111,7 +119,7 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
 - Última nota de qualificação: ${contact.qualification_notes || 'nenhuma'}
 `.trim();
 
-  const resp = await client.messages.create({
+  const resp = await getClient().messages.create({
     model: MODEL,
     max_tokens: 900,
     system: [

@@ -1,0 +1,226 @@
+// Tina via Google Gemini (gemini-2.5-flash por padrão)
+//
+// Usa structured output nativo do Gemini (responseMimeType json +
+// responseSchema) pra garantir JSON válido, equivalente ao json_schema
+// strict da OpenAI. systemInstruction recebe o prompt (cacheável).
+//
+// Custos aproximados gemini-2.5-flash (por 1M tokens):
+//   - input:        ~$0.30
+//   - cached input: ~$0.075
+//   - output:       ~$2.50
+// (valores pra estimativa do dashboard, não pra billing)
+
+import { GoogleGenAI, Type } from '@google/genai';
+import { TINA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
+import { SERVICOS } from './knowledge.js';
+import { db } from '../db/index.js';
+import { logger } from '../utils/logger.js';
+
+const VALID_SERVICES = new Set(Object.keys(SERVICOS));
+const PROVIDER = 'gemini';
+const MAX_HISTORY_TOKENS = Number(process.env.LLM_HISTORY_MAX_TOKENS || 8000);
+
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+const COST_IN_PER_MTOK = Number(process.env.GEMINI_COST_IN || 0.30);
+const COST_CACHED_IN_PER_MTOK = Number(process.env.GEMINI_COST_CACHED_IN || 0.075);
+const COST_OUT_PER_MTOK = Number(process.env.GEMINI_COST_OUT || 2.50);
+
+// Client LAZY: só constrói quando este provider é usado (evita warning de
+// chave ausente quando o primário é outro).
+let _client;
+function getClient() {
+  if (!_client) _client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  return _client;
+}
+
+// === Schema de saída (structured output do Gemini) ===
+// split é só array de strings: o WhatsApp oficial não tem botões, então a
+// Tina manda bolhas de texto. Simplifica o schema e evita anyOf.
+const TINA_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    reply: { type: Type.STRING, description: 'Texto da resposta (1-3 linhas). Vazio se usar split.' },
+    split: {
+      type: Type.ARRAY,
+      nullable: true,
+      items: { type: Type.STRING },
+      description: 'Bolhas de texto em sequência (2-3). Sobrescreve reply quando preenchido.',
+    },
+    funnel: {
+      type: Type.STRING,
+      nullable: true,
+      // sem enum aqui de propósito: enum + nullable no Gemini pode forçar um
+      // valor e nunca emitir null. O prompt restringe a escrever|publicar|divulgar|null.
+      description: 'Fase do lead: "escrever", "publicar", "divulgar" ou null se ainda não identificada.',
+    },
+    service_recommended: { type: Type.STRING, nullable: true },
+    stage: {
+      type: Type.STRING,
+      enum: ['pre_qualificando', 'qualificando', 'qualificado', 'handoff', 'desqualificado'],
+    },
+    handoff: { type: Type.BOOLEAN },
+    handoff_reason: { type: Type.STRING, nullable: true },
+    qualification_score: { type: Type.INTEGER },
+    qualification_notes: { type: Type.STRING },
+    end_conversation: { type: Type.BOOLEAN },
+    course_help: { type: Type.STRING, enum: ['nao', 'comprar', 'aluno'] },
+  },
+  required: [
+    'reply', 'split', 'funnel', 'stage', 'handoff',
+    'qualification_score', 'qualification_notes', 'end_conversation', 'course_help',
+  ],
+  propertyOrdering: [
+    'reply', 'split', 'funnel', 'service_recommended', 'stage', 'handoff',
+    'handoff_reason', 'qualification_score', 'qualification_notes',
+    'end_conversation', 'course_help',
+  ],
+};
+
+function sanitizeName(rawName) {
+  if (!rawName || typeof rawName !== 'string') return null;
+  const name = rawName.trim();
+  if (!name || name.length < 2) return null;
+  if (/\d/.test(name)) return null;
+  if (/^[\W_]+$/.test(name)) return null;
+  return name;
+}
+
+function estimateTokens(text) {
+  return Math.ceil((text || '').length / 4);
+}
+
+// Histórico no formato Gemini: role 'user' | 'model', parts:[{text}]
+function buildHistory(contactId, limit = 30) {
+  let rows = db.prepare(`
+    SELECT direction, author, content, content_type, created_at
+    FROM messages
+    WHERE contact_id = ?
+    ORDER BY created_at ASC, id ASC
+    LIMIT ?
+  `).all(contactId, limit);
+
+  let totalTokens = rows.reduce((s, m) => s + estimateTokens(m.content), 0);
+  if (totalTokens > MAX_HISTORY_TOKENS) {
+    const kept = [];
+    let cum = 0;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const t = estimateTokens(rows[i].content);
+      if (cum + t > MAX_HISTORY_TOKENS) break;
+      cum += t;
+      kept.unshift(rows[i]);
+    }
+    logger.warn(
+      { contactId, original: rows.length, kept: kept.length },
+      'history truncado por exceder MAX_HISTORY_TOKENS'
+    );
+    rows = [
+      { direction: 'inbound', author: 'lead', content: '[contexto anterior truncado por tamanho — segue só os últimos turnos]', content_type: 'text' },
+      ...kept,
+    ];
+  }
+
+  const turns = [];
+  for (const m of rows) {
+    const role = m.direction === 'inbound' ? 'user' : 'model';
+    let text = m.content || '';
+    if (m.content_type === 'audio_transcript') text = `[áudio transcrito] ${text}`;
+    if (m.content_type === 'pdf_blocked') text = `[o lead mandou um PDF — você respondeu que análise é etapa de leitura crítica]`;
+    if (m.author === 'sdr') text = `[SDR humano respondeu] ${text}`;
+    turns.push({ role, parts: [{ text }] });
+  }
+  return turns;
+}
+
+function tryParseJSON(text) {
+  if (!text) return null;
+  const cleaned = text
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  try { return JSON.parse(cleaned); } catch {}
+  const m = cleaned.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch {} }
+  return null;
+}
+
+export async function generateTinaReplyGemini({ contact, incomingText }) {
+  const history = buildHistory(contact.id);
+  if (history.length === 0 || history[history.length - 1].role !== 'user') {
+    history.push({ role: 'user', parts: [{ text: incomingText }] });
+  }
+
+  const usableName = sanitizeName(contact.name);
+  const meta = `
+Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
+- Nome: ${usableName || '⚠ AINDA NÃO CONHECIDO — use saudação genérica tipo "Olá!" sem nome até o lead se apresentar'}
+- Funil detectado até agora: ${contact.funnel || 'ainda não identificado'}
+- Estágio: ${contact.stage || 'novo'}
+- Última nota de qualificação: ${contact.qualification_notes || 'nenhuma'}
+`.trim();
+
+  // timeout de 25s (mesma justificativa dos outros providers)
+  const resp = await getClient().models.generateContent({
+    model: MODEL,
+    contents: history,
+    config: {
+      systemInstruction: `${TINA_SYSTEM_PROMPT}\n\n${meta}`,
+      temperature: 0.7,
+      maxOutputTokens: 1200,
+      responseMimeType: 'application/json',
+      responseSchema: TINA_SCHEMA,
+      abortSignal: AbortSignal.timeout(25_000),
+    },
+  });
+
+  const raw = (resp.text || '').trim();
+  const parsed = tryParseJSON(raw);
+
+  const um = resp.usageMetadata || {};
+  const cached = um.cachedContentTokenCount || 0;
+  const tokens_in = um.promptTokenCount || 0;
+  const tokens_out = um.candidatesTokenCount || 0;
+  const non_cached_in = Math.max(0, tokens_in - cached);
+
+  const cost_usd =
+    (non_cached_in / 1e6) * COST_IN_PER_MTOK +
+    (cached / 1e6) * COST_CACHED_IN_PER_MTOK +
+    (tokens_out / 1e6) * COST_OUT_PER_MTOK;
+
+  const meta_usage = {
+    tokens_in,
+    tokens_out,
+    cached_tokens: cached,
+    cost_usd,
+    provider: PROVIDER,
+    model: MODEL,
+    prompt_version: PROMPT_VERSION,
+  };
+
+  if (!parsed || (!parsed.reply && !parsed.split)) {
+    logger.warn({ raw: raw.slice(0, 300) }, 'Tina (Gemini) devolveu JSON inválido, usando fallback');
+    return {
+      reply: 'Deixa eu te conectar com alguém aqui do time, [aguarde um instante].',
+      funnel: null,
+      stage: 'pre_qualificando',
+      handoff: true,
+      handoff_reason: 'IA falhou em gerar resposta válida — encaminhando ao humano',
+      qualification_score: 0,
+      qualification_notes: '⚠ Tina falhou em gerar resposta válida',
+      end_conversation: false,
+      usage: meta_usage,
+    };
+  }
+
+  // Defesa contra hallucination de serviço (mesmo guard dos outros providers)
+  if (parsed.service_recommended && !VALID_SERVICES.has(parsed.service_recommended)) {
+    logger.warn(
+      { invented: parsed.service_recommended },
+      'Tina (Gemini) inventou serviço inexistente — descartando'
+    );
+    parsed.service_recommended = null;
+  }
+
+  return { ...parsed, usage: meta_usage };
+}

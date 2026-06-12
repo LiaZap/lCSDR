@@ -1,9 +1,8 @@
 // Router de provider LLM da Tina + sanitização pós-resposta.
 //
 // Resolução de provider:
-//   1. Se LLM_PROVIDER=openai|anthropic estiver explícito → usa esse
-//   2. Senão: se OPENAI_API_KEY válida → openai
-//   3. Senão: anthropic
+//   1. Se LLM_PROVIDER=gemini|openai|anthropic estiver explícito → usa esse
+//   2. Senão: primeira chave válida na ordem gemini → openai → anthropic
 //
 // Sanitização (cinto + suspensórios):
 //   Mesmo com regra explícita no prompt, o modelo às vezes manda "—" ou outras
@@ -11,16 +10,27 @@
 
 import { generateTinaReplyOpenAI } from './tina-openai.js';
 import { generateTinaReplyAnthropic } from './tina-anthropic.js';
+import { generateTinaReplyGemini } from './tina-gemini.js';
 import { logger } from '../utils/logger.js';
 
 let warnedProvider = false;
 
+const PROVIDERS = ['gemini', 'openai', 'anthropic'];
+
 export function llmProvider() {
   const explicit = (process.env.LLM_PROVIDER || '').toLowerCase().trim();
-  if (explicit === 'openai' || explicit === 'anthropic') return explicit;
-  if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 30) return 'openai';
-  if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.length > 30) return 'anthropic';
-  return 'openai';
+  if (PROVIDERS.includes(explicit)) return explicit;
+  // auto: primeira chave válida na ordem de preferência
+  for (const p of PROVIDERS) {
+    if (hasProviderKey(p)) return p;
+  }
+  return 'gemini';
+}
+
+function modelOf(name) {
+  if (name === 'gemini') return process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  if (name === 'openai') return process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+  return process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
 }
 
 // Remove marcas tipográficas de IA + normaliza pontuação pra estilo WhatsApp brasileiro.
@@ -90,27 +100,34 @@ function isRetryableLlmError(err) {
 }
 
 function callProvider(name, args) {
-  return name === 'openai'
-    ? generateTinaReplyOpenAI(args)
-    : generateTinaReplyAnthropic(args);
+  if (name === 'gemini') return generateTinaReplyGemini(args);
+  if (name === 'openai') return generateTinaReplyOpenAI(args);
+  return generateTinaReplyAnthropic(args);
 }
 
 function hasProviderKey(name) {
+  if (name === 'gemini') return !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 20);
   if (name === 'openai') return !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 30);
   return !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.length > 30);
 }
 
+// Escolhe o melhor fallback: primeiro provider com chave que não seja o primário.
+function pickSecondary(primary) {
+  for (const p of PROVIDERS) {
+    if (p !== primary && hasProviderKey(p)) return p;
+  }
+  return null;
+}
+
 export async function generateTinaReply({ contact, incomingText }) {
   const primary = llmProvider();
-  const secondary = primary === 'openai' ? 'anthropic' : 'openai';
+  const secondary = pickSecondary(primary);
 
   if (!warnedProvider) {
     logger.info({
       provider: primary,
-      model: primary === 'openai'
-        ? (process.env.OPENAI_MODEL || 'gpt-4.1-mini')
-        : (process.env.CLAUDE_MODEL || 'claude-sonnet-4-6'),
-      fallbackAvailable: hasProviderKey(secondary),
+      model: modelOf(primary),
+      fallback: secondary || 'nenhum',
     }, 'LLM provider ativo');
     warnedProvider = true;
   }
@@ -120,7 +137,7 @@ export async function generateTinaReply({ contact, incomingText }) {
     return sanitizeResult(raw);
   } catch (err) {
     // Tenta fallback se: erro retryable + fallback configurado + chaves diferentes
-    if (isRetryableLlmError(err) && hasProviderKey(secondary)) {
+    if (isRetryableLlmError(err) && secondary) {
       logger.warn({ primary, secondary, err: err.message, status: err.status },
         'LLM primário falhou, tentando fallback no outro provider');
       try {
@@ -141,7 +158,7 @@ export async function generateTinaReply({ contact, incomingText }) {
       funnel: null,
       stage: 'pre_qualificando',
       handoff: true,
-      handoff_reason: `IA indisponível (${primary}${hasProviderKey(secondary) ? ' + fallback' : ''}): ${err.message}`,
+      handoff_reason: `IA indisponível (${primary}${secondary ? ` + ${secondary}` : ''}): ${err.message}`,
       qualification_score: 0,
       qualification_notes: '⚠ Ambos LLMs falharam — encaminhando ao humano',
       end_conversation: false,

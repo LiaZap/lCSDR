@@ -24,11 +24,20 @@ const MAX_HISTORY_TOKENS = Number(process.env.LLM_HISTORY_MAX_TOKENS || 8000);
 
 // timeout de 25s + 1 retry no SDK. Sem isso, OpenAI degradada trava
 // o webhook handler por 60-120s (default do SDK), encadeando WAL e leads.
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  timeout: 25_000,
-  maxRetries: 1,
-});
+// Client LAZY: só constrói quando este provider é realmente usado. Sem isso,
+// trocar o provider primário pra Gemini e remover OPENAI_API_KEY quebraria o
+// boot (o SDK da OpenAI estoura ao instanciar sem chave).
+let _client;
+function getClient() {
+  if (!_client) {
+    _client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      timeout: 25_000,
+      maxRetries: 1,
+    });
+  }
+  return _client;
+}
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 
 const COST_IN_PER_MTOK = 0.40;
@@ -211,7 +220,7 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
   // e o TINA_SYSTEM_PROMPT permanece estável em `instructions`.
   let response;
   try {
-    response = await client.responses.create({
+    response = await getClient().responses.create({
       model: MODEL,
       instructions: TINA_SYSTEM_PROMPT,
       input: [
