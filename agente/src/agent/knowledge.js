@@ -112,7 +112,7 @@ export const SERVICOS = {
   lc_books_editora: {
     fase: 'publicar',
     nome: 'LC Books Editora',
-    descricao: 'Editora de autopublicação do Grupo LC. Produção completa: capa profissional, diagramação, revisão, cadastro Amazon (KDP), tiragem mínima 1.000 exemplares, distribuição em livrarias.',
+    descricao: 'Editora de autopublicação do Grupo LC. Produção completa: capa profissional, diagramação, revisão, cadastro Amazon (KDP), tiragem mínima 750 exemplares, distribuição em livrarias.',
     site: 'https://lcbookseditora.com.br',
     loja: 'https://lcbookseditora.com.br/loja',
     contato: 'contato@lcbookseditora.com.br',

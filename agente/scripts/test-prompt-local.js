@@ -99,18 +99,19 @@ const CENARIOS = [
     ],
   },
   {
-    nome: 'C06 - Lead direto ao preço',
-    avaliacao_referencia: 'feedback #16/#38/#86 (Brenda + Andressa)',
+    nome: 'C06 - Lead direto ao preço (REGRA Nº1: NUNCA dizer preço)',
+    avaliacao_referencia: 'reunião 12/06 Lilian: nunca fala preço',
     contato: { name: 'Felipe', funnel: 'publicar', stage: 'novo', qualification_notes: null },
     turnos: [
       { lead: 'Quanto custa pra publicar? Me diz só o valor.' },
       { lead: 'Não quero conversar com ninguém, só preço.' },
     ],
     validar: [
+      '🔴 NÃO PODE dizer NENHUM valor de serviço (nada de 50.000, 7.800)',
       'NÃO deve usar "custo" (deve usar "investimento")',
-      'DEVE oferecer 2 opções: arquivo PDF pra análise OU info básica pra orçamento',
+      'DEVE usar o gate "investir a partir de R$ 629/mês, faz sentido?"',
+      'DEVE dizer que quem apresenta proposta é o especialista',
       'NÃO deve encerrar',
-      'PODE mencionar piso de investimento LC Books a partir de 50k',
     ],
   },
   {
@@ -163,8 +164,37 @@ const CENARIOS = [
     validar: [
       'PODE mencionar case Café com Deus Pai',
       'DEVE pedir arquivo PDF do livro',
-      'DEVE explicar LC Books + investimento',
+      'NÃO deve dizer preço de serviço',
       'DEVE terminar com pergunta',
+    ],
+  },
+  {
+    nome: 'C11 - Lead qualificado pede reunião (handoff + agendamento)',
+    avaliacao_referencia: 'reunião 12/06: Tina é SDR, qualifica e agenda',
+    contato: { name: 'Vitor', funnel: 'divulgar', stage: 'qualificando', qualification_notes: 'palestrante, livro liderança publicado Amazon, @vitor.lideranca, quer divulgar' },
+    turnos: [
+      { lead: 'Tenho livro de liderança publicado na Amazon, link tá na bio, meu insta é @vitor.lideranca.' },
+      { tina: '[contexto: Tina perguntou sobre investimento via gate R$629]' },
+      { lead: 'Sim, consigo investir nesse valor tranquilo. Quero marcar uma reunião.' },
+    ],
+    validar: [
+      '🟢 DEVE marcar handoff: true + stage: "qualificado"',
+      'DEVE convidar pro agendamento (horário hoje/amanhã)',
+      'NÃO deve dizer preço de serviço',
+      'NÃO deve continuar dialogando depois do handoff',
+    ],
+  },
+  {
+    nome: 'C12 - Lead pergunta preço de assessoria direto',
+    avaliacao_referencia: 'reunião 12/06 Lilian: estopim foi Tina soltar R$7.800',
+    contato: { name: 'Marcos', funnel: 'divulgar', stage: 'qualificando', qualification_notes: 'livro publicado, quer assessoria de imprensa' },
+    turnos: [
+      { lead: 'Quanto custa a assessoria de imprensa de vocês por mês?' },
+    ],
+    validar: [
+      '🔴 NÃO PODE dizer R$ 7.800 nem nenhum valor de assessoria',
+      'DEVE dizer que o especialista apresenta a proposta',
+      'DEVE usar o gate de R$ 629/mês pra qualificar',
     ],
   },
 ];
