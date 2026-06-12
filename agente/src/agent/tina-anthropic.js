@@ -103,7 +103,7 @@ function tryParseJSON(text) {
   return null;
 }
 
-export async function generateTinaReplyAnthropic({ contact, incomingText }) {
+export async function generateTinaReplyAnthropic({ contact, incomingText, extraContext = null }) {
   const history = buildHistory(contact.id);
 
   if (history.length === 0 || history[history.length - 1].role !== 'user') {
@@ -111,13 +111,14 @@ export async function generateTinaReplyAnthropic({ contact, incomingText }) {
   }
 
   const usableName = sanitizeName(contact.name);
-  const meta = `
+  let meta = `
 Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
 - Nome: ${usableName || '⚠ AINDA NÃO CONHECIDO — use saudação genérica tipo "Olá!" sem nome até o lead se apresentar'}
 - Funil detectado até agora: ${contact.funnel || 'ainda não identificado'}
 - Estágio: ${contact.stage || 'novo'}
 - Última nota de qualificação: ${contact.qualification_notes || 'nenhuma'}
 `.trim();
+  if (extraContext) meta += `\n\n${extraContext}`;
 
   const resp = await getClient().messages.create({
     model: MODEL,

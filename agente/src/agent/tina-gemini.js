@@ -63,6 +63,11 @@ const TINA_SCHEMA = {
     qualification_notes: { type: Type.STRING },
     end_conversation: { type: Type.BOOLEAN },
     course_help: { type: Type.STRING, enum: ['nao', 'comprar', 'aluno'] },
+    book_slot: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'ISO do horário que o lead confirmou agendar (copie EXATO da lista de horários disponíveis). null se não está agendando agora.',
+    },
   },
   required: [
     'reply', 'split', 'funnel', 'stage', 'handoff',
@@ -71,7 +76,7 @@ const TINA_SCHEMA = {
   propertyOrdering: [
     'reply', 'split', 'funnel', 'service_recommended', 'stage', 'handoff',
     'handoff_reason', 'qualification_score', 'qualification_notes',
-    'end_conversation', 'course_help',
+    'end_conversation', 'course_help', 'book_slot',
   ],
 };
 
@@ -143,20 +148,21 @@ function tryParseJSON(text) {
   return null;
 }
 
-export async function generateTinaReplyGemini({ contact, incomingText }) {
+export async function generateTinaReplyGemini({ contact, incomingText, extraContext = null }) {
   const history = buildHistory(contact.id);
   if (history.length === 0 || history[history.length - 1].role !== 'user') {
     history.push({ role: 'user', parts: [{ text: incomingText }] });
   }
 
   const usableName = sanitizeName(contact.name);
-  const meta = `
+  let meta = `
 Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
 - Nome: ${usableName || '⚠ AINDA NÃO CONHECIDO — use saudação genérica tipo "Olá!" sem nome até o lead se apresentar'}
 - Funil detectado até agora: ${contact.funnel || 'ainda não identificado'}
 - Estágio: ${contact.stage || 'novo'}
 - Última nota de qualificação: ${contact.qualification_notes || 'nenhuma'}
 `.trim();
+  if (extraContext) meta += `\n\n${extraContext}`;
 
   // timeout de 25s (mesma justificativa dos outros providers)
   //

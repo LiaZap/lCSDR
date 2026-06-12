@@ -158,10 +158,13 @@ export function scheduleFollowup(contactId, reason = 'silencio_lead', minutesFro
   `).run(contactId, due, reason);
 }
 
-export async function markQualifiedAndHandoff(contact, result) {
+// pause=false: usado no modo agendamento, onde a Tina precisa CONTINUAR ativa
+// pra puxar horários e fechar a reunião. Nesse caso o webhook já setou
+// stage='agendando' e não queremos sobrescrever pra 'qualificado' nem pausar.
+export async function markQualifiedAndHandoff(contact, result, { pause = true } = {}) {
   db.prepare(`
     UPDATE contacts
-    SET stage = 'qualificado',
+    SET stage = ${pause ? "'qualificado'" : 'stage'},
         funnel = COALESCE(?, funnel),
         qualification_score = ?,
         qualification_notes = ?,
@@ -169,7 +172,7 @@ export async function markQualifiedAndHandoff(contact, result) {
     WHERE id = ?
   `).run(result.funnel || null, result.qualification_score || 0, result.qualification_notes || '', contact.id);
 
-  pauseIA(contact.id, 'qualificado_pronto_pro_sdr');
+  if (pause) pauseIA(contact.id, 'qualificado_pronto_pro_sdr');
 
   // As etiquetas (tina-agenda, temperatura, etc) são aplicadas pelo
   // applyTinaTags() que o webhook chama a cada turno. Aqui só custom

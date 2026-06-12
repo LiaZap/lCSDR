@@ -56,7 +56,7 @@ const TINA_SCHEMA = {
     'reply', 'split', 'funnel', 'service_recommended',
     'stage', 'handoff', 'handoff_reason',
     'qualification_score', 'qualification_notes', 'end_conversation',
-    'course_help',
+    'course_help', 'book_slot',
   ],
   properties: {
     reply: {
@@ -135,6 +135,10 @@ const TINA_SCHEMA = {
       enum: ['nao', 'comprar', 'aluno'],
       description: 'Dúvida sobre o curso da LC: "nao" = não é dúvida de curso. "comprar" = lead NÃO-aluno perguntando sobre o curso com interesse de comprar (vai pro SDR vender). "aluno" = lead que JÁ é aluno do curso com dúvida sobre o conteúdo (vai pro suporte cursos@lcagencia.com.br).',
     },
+    book_slot: {
+      anyOf: [{ type: 'string' }, { type: 'null' }],
+      description: 'ISO do horário que o lead confirmou agendar (copie EXATO da lista de horários disponíveis fornecida no contexto). null se não está agendando agora.',
+    },
   },
 };
 
@@ -197,20 +201,21 @@ function buildHistory(contactId, limit = 30) {
   });
 }
 
-export async function generateTinaReplyOpenAI({ contact, incomingText }) {
+export async function generateTinaReplyOpenAI({ contact, incomingText, extraContext = null }) {
   const history = buildHistory(contact.id);
   if (history.length === 0 || history[history.length - 1].role !== 'user') {
     history.push({ role: 'user', content: incomingText });
   }
 
   const usableName = sanitizeContactName(contact.name);
-  const meta = `
+  let meta = `
 Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
 - Nome: ${usableName || '⚠ AINDA NÃO CONHECIDO — use saudação genérica tipo "Olá!" sem nome até o lead se apresentar'}
 - Funil detectado até agora: ${contact.funnel || 'ainda não identificado'}
 - Estágio: ${contact.stage || 'novo'}
 - Última nota de qualificação: ${contact.qualification_notes || 'nenhuma'}
 `.trim();
+  if (extraContext) meta += `\n\n${extraContext}`;
 
   // === CACHE-FRIENDLY ===
   // `instructions` precisa ficar CONSTANTE pra OpenAI hit no prefix-cache

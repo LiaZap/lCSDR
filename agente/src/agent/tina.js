@@ -119,7 +119,7 @@ function pickSecondary(primary) {
   return null;
 }
 
-export async function generateTinaReply({ contact, incomingText }) {
+export async function generateTinaReply({ contact, incomingText, extraContext = null }) {
   const primary = llmProvider();
   const secondary = pickSecondary(primary);
 
@@ -133,7 +133,7 @@ export async function generateTinaReply({ contact, incomingText }) {
   }
 
   try {
-    const raw = await callProvider(primary, { contact, incomingText });
+    const raw = await callProvider(primary, { contact, incomingText, extraContext });
     return sanitizeResult(raw);
   } catch (err) {
     // Tenta fallback se: erro retryable + fallback configurado + chaves diferentes
@@ -141,7 +141,7 @@ export async function generateTinaReply({ contact, incomingText }) {
       logger.warn({ primary, secondary, err: err.message, status: err.status },
         'LLM primário falhou, tentando fallback no outro provider');
       try {
-        const raw = await callProvider(secondary, { contact, incomingText });
+        const raw = await callProvider(secondary, { contact, incomingText, extraContext });
         return sanitizeResult(raw);
       } catch (err2) {
         logger.error({ err2: err2.message, status: err2.status },
