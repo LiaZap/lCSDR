@@ -16,6 +16,7 @@ import {
 import {
   schedulingEnabled, getNextSlots, slotsContextBlock, bookSlot,
 } from '../agent/scheduling.js';
+import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
 import { notifyAgendamento } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
 
@@ -346,8 +347,21 @@ async function handleInbound(event) {
       }
     }
 
-    // 8) Envia resposta(s)
+    // 7.5) BÔNUS: lead deu o título do livro → busca o link e anexa a
+    // confirmação (a Tina nunca inventa link, quem busca é o sistema).
     const items = result.split && result.split.length ? result.split : [result.reply];
+    if (bookSearchEnabled() && result.search_book) {
+      const found = await searchBookLink(result.search_book);
+      if (found && found.link) {
+        items.push(`Consultei aqui pelo título e encontrei esse: ${found.link} 😊 Confere se é esse mesmo o seu livro?`);
+        db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'book_found', ?)`)
+          .run(fresh.id, JSON.stringify({ query: result.search_book, link: found.link }));
+      } else {
+        items.push('Não consegui localizar pelo título aqui. Você pode me mandar o link de vendas do seu livro?');
+      }
+    }
+
+    // 8) Envia resposta(s)
     await sendSequence(fresh, items);
     for (const item of items) {
       const txt = typeof item === 'string' ? item : (item?.text || '');

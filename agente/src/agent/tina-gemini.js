@@ -68,6 +68,11 @@ const TINA_SCHEMA = {
       nullable: true,
       description: 'ISO do horário que o lead confirmou agendar (copie EXATO da lista de horários disponíveis). null se não está agendando agora.',
     },
+    search_book: {
+      type: Type.STRING,
+      nullable: true,
+      description: 'Título do livro (+ autor, se souber) pra o sistema pesquisar o link de venda e confirmar com o lead. Preencha SÓ quando o lead disser que tem livro publicado e informar o título, mas não tiver mandado o link. Você NÃO inventa o link, só passa o título aqui. null caso contrário.',
+    },
   },
   required: [
     'reply', 'split', 'funnel', 'stage', 'handoff',
@@ -76,7 +81,7 @@ const TINA_SCHEMA = {
   propertyOrdering: [
     'reply', 'split', 'funnel', 'service_recommended', 'stage', 'handoff',
     'handoff_reason', 'qualification_score', 'qualification_notes',
-    'end_conversation', 'course_help', 'book_slot',
+    'end_conversation', 'course_help', 'book_slot', 'search_book',
   ],
 };
 

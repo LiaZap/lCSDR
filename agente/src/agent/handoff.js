@@ -136,13 +136,18 @@ export function resumeIA(contactId, reason = 'silencio_humano') {
   `).run(contactId, JSON.stringify({ reason }));
 }
 
-// Pode desativar o follow-up "silencio_sdr" via env. Durante teste da
-// equipe LC, recomendado deixar OFF pra Tina não atropelar SDR humano
-// que esteja conversando manualmente após handoff. Default OFF pra
-// segurança; em produção a LC decide se religa.
+// Decisão da Lilian (jun/2026): a Tina é SDR PURA, não faz follow-up.
+// Quem faz follow-up é o time comercial. Por isso o follow-up vem DESLIGADO
+// por padrão. Pra religar (caso a LC mude de ideia), FOLLOWUP_ENABLED=true.
+const FOLLOWUP_ENABLED = process.env.FOLLOWUP_ENABLED === 'true';
 const FOLLOWUP_SDR_ENABLED = process.env.FOLLOWUP_SILENCIO_SDR_ENABLED === 'true';
 
 export function scheduleFollowup(contactId, reason = 'silencio_lead', minutesFromNow = FOLLOWUP_MIN) {
+  // SDR pura: sem follow-up. Só cancela pendências antigas e sai.
+  if (!FOLLOWUP_ENABLED) {
+    db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(contactId);
+    return;
+  }
   // Pula o follow-up de silencio_sdr se desativado por env.
   if (reason === 'silencio_sdr' && !FOLLOWUP_SDR_ENABLED) {
     return;
