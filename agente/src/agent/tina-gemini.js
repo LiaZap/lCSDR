@@ -1,14 +1,12 @@
-// Tina via Google Gemini (gemini-2.5-flash por padrão)
+// Tina via Google Gemini (gemini-3.0-flash por padrão)
 //
 // Usa structured output nativo do Gemini (responseMimeType json +
 // responseSchema) pra garantir JSON válido, equivalente ao json_schema
 // strict da OpenAI. systemInstruction recebe o prompt (cacheável).
 //
-// Custos aproximados gemini-2.5-flash (por 1M tokens):
-//   - input:        ~$0.30
-//   - cached input: ~$0.075
-//   - output:       ~$2.50
-// (valores pra estimativa do dashboard, não pra billing)
+// Custos por 1M tokens são configuráveis por env (GEMINI_COST_*), pois
+// variam por modelo. Defaults aproximados (estimativa do dashboard, não
+// billing). Ajuste GEMINI_COST_IN/OUT/CACHED_IN conforme o pricing do 3.0.
 
 import { GoogleGenAI, Type } from '@google/genai';
 import { TINA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
@@ -20,7 +18,7 @@ const VALID_SERVICES = new Set(Object.keys(SERVICOS));
 const PROVIDER = 'gemini';
 const MAX_HISTORY_TOKENS = Number(process.env.LLM_HISTORY_MAX_TOKENS || 8000);
 
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 
 const COST_IN_PER_MTOK = Number(process.env.GEMINI_COST_IN || 0.30);
 const COST_CACHED_IN_PER_MTOK = Number(process.env.GEMINI_COST_CACHED_IN || 0.075);
@@ -161,13 +159,23 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
 `.trim();
 
   // timeout de 25s (mesma justificativa dos outros providers)
+  //
+  // thinkingConfig: o Gemini 3 Flash "pensa" antes de responder, e esse
+  // raciocínio CONSOME o maxOutputTokens. Sem controlar, o JSON sai truncado
+  // (resposta inválida → fallback). Pra uma SDR queremos resposta rápida e
+  // direta: thinkingLevel baixo + teto de tokens folgado garantem o JSON
+  // completo. Configurável por env (GEMINI_THINKING_LEVEL, GEMINI_MAX_TOKENS).
+  const thinkingLevel = process.env.GEMINI_THINKING_LEVEL || 'low';
+  const maxOutputTokens = Number(process.env.GEMINI_MAX_TOKENS || 2048);
+
   const resp = await getClient().models.generateContent({
     model: MODEL,
     contents: history,
     config: {
       systemInstruction: `${TINA_SYSTEM_PROMPT}\n\n${meta}`,
       temperature: 0.7,
-      maxOutputTokens: 1200,
+      maxOutputTokens,
+      thinkingConfig: { thinkingLevel },
       responseMimeType: 'application/json',
       responseSchema: TINA_SCHEMA,
       abortSignal: AbortSignal.timeout(25_000),

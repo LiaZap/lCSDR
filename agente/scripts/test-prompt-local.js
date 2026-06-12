@@ -21,8 +21,9 @@ import { generateTinaReply, llmProvider } from '../src/agent/tina.js';
 import { recordInbound, recordOutbound } from '../src/agent/contactService.js';
 
 const PROVIDER = llmProvider();
-const MODEL = PROVIDER === 'openai'
-  ? (process.env.OPENAI_MODEL || 'gpt-4.1-mini')
+const MODEL =
+  PROVIDER === 'gemini' ? (process.env.GEMINI_MODEL || 'gemini-3-flash-preview')
+  : PROVIDER === 'openai' ? (process.env.OPENAI_MODEL || 'gpt-4.1-mini')
   : (process.env.CLAUDE_MODEL || 'claude-sonnet-4-6');
 
 if (PROVIDER === 'openai' && !process.env.OPENAI_API_KEY) {
@@ -31,6 +32,10 @@ if (PROVIDER === 'openai' && !process.env.OPENAI_API_KEY) {
 }
 if (PROVIDER === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
   console.error('Erro: provider anthropic mas ANTHROPIC_API_KEY ausente no .env');
+  process.exit(1);
+}
+if (PROVIDER === 'gemini' && !process.env.GEMINI_API_KEY) {
+  console.error('Erro: provider gemini mas GEMINI_API_KEY ausente no .env');
   process.exit(1);
 }
 
@@ -216,7 +221,8 @@ const CENARIOS = [
 // e chama generateTinaReply() (caminho de produção). Apaga o contato no fim.
 async function runScenario(c, idx) {
   console.log(`\n[${c.nome}]`);
-  const ghlId = `test-prompt-${idx}-${c.contato.phone || c.contato.name || idx}`;
+  // ghlId único por execução (evita colisão UNIQUE com run anterior)
+  const ghlId = `test-prompt-${idx}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
   // contato com o estágio/funil/nota do cenário (mesma calibração que produção usa)
   const info = db.prepare(`
