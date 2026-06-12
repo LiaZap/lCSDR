@@ -18,7 +18,7 @@ const VALID_SERVICES = new Set(Object.keys(SERVICOS));
 const PROVIDER = 'gemini';
 const MAX_HISTORY_TOKENS = Number(process.env.LLM_HISTORY_MAX_TOKENS || 8000);
 
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
 const COST_IN_PER_MTOK = Number(process.env.GEMINI_COST_IN || 0.30);
 const COST_CACHED_IN_PER_MTOK = Number(process.env.GEMINI_COST_CACHED_IN || 0.075);
