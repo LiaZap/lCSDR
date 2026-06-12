@@ -1,25 +1,38 @@
-// Roda o prompt da Tina contra cenários críticos das avaliações da equipe LC.
-// SEM banco, SEM webhook, SEM GHL. Só OpenAI + prompt.
+// Roda os cenários críticos pelo CAMINHO DE PRODUÇÃO REAL da Tina.
+// Usa generateTinaReply() -> mesmo provider (OpenAI Responses API + JSON
+// Schema strict), mesma sanitização e mesmo histórico do banco que o lead
+// recebe no WhatsApp. NÃO é uma simulação simplificada: é idêntico à prod.
+//
+// Cria contatos temporários no banco local (prefixo test-prompt-) e os
+// APAGA no fim. Não polui dados reais.
 //
 // Uso:
-//   1. Define OPENAI_API_KEY no .env do agente
+//   1. Define OPENAI_API_KEY no .env do agente (e LLM_PROVIDER se quiser forçar)
 //   2. cd agente
 //   3. node scripts/test-prompt-local.js
 //
-// Saída: docs/teste-prompt-output.md com cada cenário + resposta da Tina.
+// Saída: docs/teste-prompt-output.md + .json
 import 'dotenv/config';
-import OpenAI from 'openai';
 import fs from 'node:fs';
 import path from 'node:path';
-import { TINA_SYSTEM_PROMPT, PROMPT_VERSION } from '../src/agent/systemPrompt.js';
+import { PROMPT_VERSION } from '../src/agent/systemPrompt.js';
+import { db } from '../src/db/index.js';
+import { generateTinaReply, llmProvider } from '../src/agent/tina.js';
+import { recordInbound, recordOutbound } from '../src/agent/contactService.js';
 
-if (!process.env.OPENAI_API_KEY) {
-  console.error('Erro: defina OPENAI_API_KEY no .env');
+const PROVIDER = llmProvider();
+const MODEL = PROVIDER === 'openai'
+  ? (process.env.OPENAI_MODEL || 'gpt-4.1-mini')
+  : (process.env.CLAUDE_MODEL || 'claude-sonnet-4-6');
+
+if (PROVIDER === 'openai' && !process.env.OPENAI_API_KEY) {
+  console.error('Erro: provider openai mas OPENAI_API_KEY ausente no .env');
   process.exit(1);
 }
-
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 25_000 });
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+if (PROVIDER === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
+  console.error('Erro: provider anthropic mas ANTHROPIC_API_KEY ausente no .env');
+  process.exit(1);
+}
 
 // === Cenários extraídos das avaliações da equipe LC ===
 const CENARIOS = [
@@ -199,66 +212,65 @@ const CENARIOS = [
   },
 ];
 
-async function runScenario(c) {
+// Cria um contato temporário no banco, injeta os turnos como mensagens reais
+// e chama generateTinaReply() (caminho de produção). Apaga o contato no fim.
+async function runScenario(c, idx) {
   console.log(`\n[${c.nome}]`);
-  const meta = `
-Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
-- Nome: ${c.contato.name || '⚠ AINDA NÃO CONHECIDO — use saudação genérica tipo "Olá!" sem nome até o lead se apresentar'}
-- Funil detectado até agora: ${c.contato.funnel || 'ainda não identificado'}
-- Estágio: ${c.contato.stage || 'novo'}
-- Última nota de qualificação: ${c.contato.qualification_notes || 'nenhuma'}
-`.trim();
+  const ghlId = `test-prompt-${idx}-${c.contato.phone || c.contato.name || idx}`;
 
-  const respostas = [];
-  const history = [];
-
-  for (const t of c.turnos) {
-    if (t.lead) history.push({ role: 'user', content: t.lead });
-    if (t.tina) history.push({ role: 'assistant', content: t.tina });
-  }
-
-  // Garante que último é user
-  if (history[history.length - 1].role !== 'user') {
-    history.push({ role: 'user', content: '(lead segue conversa)' });
-  }
+  // contato com o estágio/funil/nota do cenário (mesma calibração que produção usa)
+  const info = db.prepare(`
+    INSERT INTO contacts (ghl_contact_id, name, stage, funnel, qualification_notes)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(
+    ghlId,
+    c.contato.name || null,
+    c.contato.stage || 'novo',
+    c.contato.funnel || null,
+    c.contato.qualification_notes || null,
+  );
+  const contactId = info.lastInsertRowid;
 
   try {
-    const r = await client.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: TINA_SYSTEM_PROMPT },
-        { role: 'system', content: meta },
-        ...history,
-      ],
-      response_format: { type: 'json_object' },
-      max_tokens: 900,
-      temperature: 0.7,
-    });
+    // Reproduz a conversa no banco: cada turno vira mensagem real.
+    let lastLead = null;
+    for (const t of c.turnos) {
+      if (t.lead) { recordInbound(contactId, { content: t.lead }); lastLead = t.lead; }
+      if (t.tina) { recordOutbound(contactId, { author: 'ia', content: t.tina }); }
+    }
 
-    const text = r.choices[0].message.content;
-    const parsed = JSON.parse(text);
-    respostas.push({ turnos: c.turnos, resposta: parsed, tokens: r.usage });
-    console.log(`  ✓ resposta gerada (${r.usage.total_tokens} tokens)`);
-    return { cenario: c, resposta: parsed, tokens: r.usage };
+    const fresh = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contactId);
+    // CAMINHO DE PRODUÇÃO: Responses API + schema strict + sanitização
+    const resposta = await generateTinaReply({ contact: fresh, incomingText: lastLead });
+    const usage = resposta.usage || {};
+    console.log(`  ✓ resposta gerada (${usage.tokens_in || '?'} in / ${usage.tokens_out || '?'} out, ${usage.provider || PROVIDER})`);
+    return { cenario: c, resposta, tokens: { prompt_tokens: usage.tokens_in || 0, completion_tokens: usage.tokens_out || 0 } };
   } catch (err) {
     console.error(`  ✗ erro: ${err.message}`);
     return { cenario: c, erro: err.message };
+  } finally {
+    // Limpa o contato temporário e suas mensagens
+    db.prepare('DELETE FROM messages WHERE contact_id = ?').run(contactId);
+    db.prepare('DELETE FROM followups WHERE contact_id = ?').run(contactId);
+    db.prepare('DELETE FROM events_log WHERE contact_id = ?').run(contactId);
+    db.prepare('DELETE FROM contacts WHERE id = ?').run(contactId);
   }
 }
 
 async function main() {
   console.log(`Testando prompt versão ${PROMPT_VERSION}`);
-  console.log(`Modelo: ${MODEL}`);
+  console.log(`Provider: ${PROVIDER} | Modelo: ${MODEL} (CAMINHO DE PRODUÇÃO)`);
   console.log(`Cenários: ${CENARIOS.length}\n`);
 
   const out = [];
-  for (const c of CENARIOS) {
-    out.push(await runScenario(c));
+  for (let i = 0; i < CENARIOS.length; i++) {
+    out.push(await runScenario(CENARIOS[i], i + 1));
   }
 
   // Markdown
   let md = `# Teste do prompt da Tina (versão ${PROMPT_VERSION})\n\n`;
-  md += `Modelo: ${MODEL}\n`;
+  md += `Provider: ${PROVIDER} | Modelo: ${MODEL}\n`;
+  md += `Caminho: PRODUÇÃO real (generateTinaReply → Responses API + schema strict + sanitização)\n`;
   md += `Gerado em: ${new Date().toISOString()}\n\n---\n\n`;
 
   for (const r of out) {
