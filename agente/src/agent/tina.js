@@ -11,6 +11,7 @@
 import { generateTinaReplyOpenAI } from './tina-openai.js';
 import { generateTinaReplyAnthropic } from './tina-anthropic.js';
 import { generateTinaReplyGemini } from './tina-gemini.js';
+import { applyPolicyGuard } from './policyGuard.js';
 import { logger } from '../utils/logger.js';
 
 let warnedProvider = false;
@@ -88,6 +89,15 @@ function sanitizeResult(result) {
   return result;
 }
 
+// Pipeline final de toda resposta da Tina: sanitização tipográfica +
+// guardrail determinístico (trava de preço, Master/Press, "custo", etc).
+// Toda resposta que sai pro lead passa por aqui, inclusive a do fallback.
+function finalize(raw, contact) {
+  const sanitized = sanitizeResult(raw);
+  const { result } = applyPolicyGuard(sanitized, contact);
+  return result;
+}
+
 // Erro do provider é "retryable" se for: timeout, rate limit, ou 5xx do servidor.
 // Se for 4xx (auth, bad request, etc), NÃO faz fallback — é bug nosso.
 function isRetryableLlmError(err) {
@@ -134,7 +144,7 @@ export async function generateTinaReply({ contact, incomingText, extraContext = 
 
   try {
     const raw = await callProvider(primary, { contact, incomingText, extraContext });
-    return sanitizeResult(raw);
+    return finalize(raw, contact);
   } catch (err) {
     // Tenta fallback se: erro retryable + fallback configurado + chaves diferentes
     if (isRetryableLlmError(err) && secondary) {
@@ -142,7 +152,7 @@ export async function generateTinaReply({ contact, incomingText, extraContext = 
         'LLM primário falhou, tentando fallback no outro provider');
       try {
         const raw = await callProvider(secondary, { contact, incomingText, extraContext });
-        return sanitizeResult(raw);
+        return finalize(raw, contact);
       } catch (err2) {
         logger.error({ err2: err2.message, status: err2.status },
           'LLM fallback também falhou — devolvendo handoff de emergência');
