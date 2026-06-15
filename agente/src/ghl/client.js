@@ -167,6 +167,12 @@ export const GHL = {
       ...(assignedUserId ? { assignedUserId } : {}),
     });
   },
+  async deleteAppointment(eventId) {
+    return ghl('DELETE', `/calendars/events/${eventId}`);
+  },
+  async deleteContact(contactId) {
+    return ghl('DELETE', `/contacts/${contactId}`);
+  },
 
   // === PIPELINES / OPORTUNIDADES ===
   async listPipelines() {
