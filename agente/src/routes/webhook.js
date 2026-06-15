@@ -14,7 +14,7 @@ import {
   markQualifiedAndHandoff, markDisqualified, applyTinaTags,
 } from '../agent/handoff.js';
 import {
-  schedulingEnabled, getNextSlots, slotsContextBlock, bookSlot,
+  schedulingEnabled, getNextSlots, slotsContextBlock, bookSlot, recordOffer,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
 import { notifyAgendamento } from '../agent/notify.js';
@@ -329,6 +329,7 @@ async function handleInbound(event) {
       const slots = await getNextSlots(3);
       if (slots.length) {
         extraContext = slotsContextBlock(slots);
+        recordOffer(fresh.id, slots);  // guarda qual closer tem cada horário
       } else {
         // Sem horário disponível: cai no handoff normal (humano confirma)
         logger.warn({ contactId: fresh.id }, 'agendando mas sem free-slots, handoff normal');
