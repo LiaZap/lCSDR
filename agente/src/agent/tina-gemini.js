@@ -153,6 +153,36 @@ function tryParseJSON(text) {
   return null;
 }
 
+// Erro transitório da Google que vale retry (503/500/429/timeout/conn).
+function isTransientGeminiError(err) {
+  const msg = String(err?.message || '');
+  const status = err?.status || err?.code;
+  if (status === 503 || status === 500 || status === 429) return true;
+  return /503|500|429|UNAVAILABLE|RESOURCE_EXHAUSTED|INTERNAL|timeout|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed/i.test(msg);
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Chama generateContent com até N retries em erro transitório (backoff: 0.4s, 1s).
+async function generateWithRetry(req, retries = 2) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await getClient().models.generateContent(req);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries && isTransientGeminiError(err)) {
+        const delay = attempt === 0 ? 400 : 1000;
+        logger.warn({ attempt: attempt + 1, err: err.message }, 'Gemini transitório, retry com backoff');
+        await sleep(delay);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
 export async function generateTinaReplyGemini({ contact, incomingText, extraContext = null }) {
   const history = buildHistory(contact.id);
   if (history.length === 0 || history[history.length - 1].role !== 'user') {
@@ -179,7 +209,9 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
   const thinkingLevel = process.env.GEMINI_THINKING_LEVEL || 'low';
   const maxOutputTokens = Number(process.env.GEMINI_MAX_TOKENS || 2048);
 
-  const resp = await getClient().models.generateContent({
+  // Retry com backoff em 503/429/timeout transitório da Google. Reabsorve o
+  // tranco curto SEM acionar o fallback OpenAI (que é mais lento/caro).
+  const resp = await generateWithRetry({
     model: MODEL,
     contents: history,
     config: {

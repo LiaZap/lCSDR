@@ -295,9 +295,12 @@ export function resolveServiceKey(value) {
 
   // 1) já é a chave exata
   if (SERVICOS[value]) return value;
-  // 2) chave normalizada
+  // 2) chave normalizada (aceita hífen/espaço no lugar de underscore:
+  //    "lc-books-editora" / "lc books editora" → "lc_books_editora")
+  const slug = v.replace(/[\s-]+/g, '_');
   for (const key of Object.keys(SERVICOS)) {
-    if (key.toLowerCase() === v) return key;
+    const kl = key.toLowerCase();
+    if (kl === v || kl === slug) return key;
   }
   // 3) nome EXATO (prioridade sobre parcial, pra não confundir
   //    "Leitura Crítica" com "Ghost Writer / Leitura Crítica")
