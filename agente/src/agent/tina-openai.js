@@ -12,7 +12,7 @@
 
 import OpenAI from 'openai';
 import { TINA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
-import { SERVICOS } from './knowledge.js';
+import { SERVICOS, resolveServiceKey } from './knowledge.js';
 import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -296,14 +296,16 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
     };
   }
 
-  // Defesa contra hallucination de serviço: se a Tina inventou uma chave,
-  // descarta pra não confirmar produto inexistente pro lead.
-  if (parsed.service_recommended && !VALID_SERVICES.has(parsed.service_recommended)) {
-    logger.warn(
-      { invented: parsed.service_recommended, valid: [...VALID_SERVICES] },
-      'Tina inventou serviço inexistente — descartando service_recommended'
-    );
-    parsed.service_recommended = null;
+  // Normaliza service_recommended pra chave canônica (aceita nome OU chave).
+  // Só descarta se não casar com nenhum serviço real do catálogo.
+  if (parsed.service_recommended) {
+    const key = resolveServiceKey(parsed.service_recommended);
+    if (key) {
+      parsed.service_recommended = key;
+    } else {
+      logger.warn({ invented: parsed.service_recommended }, 'Tina citou serviço fora do catálogo — descartando');
+      parsed.service_recommended = null;
+    }
   }
 
   return { ...parsed, usage: meta_usage };

@@ -284,6 +284,41 @@ export const LINKS = {
   editora_email: 'contato@lcbookseditora.com.br',
 };
 
+// Resolve o serviço recomendado pela IA pra CHAVE canônica de SERVICOS.
+// A IA às vezes devolve o nome bonito ("Curso Escritores Admiráveis") em vez
+// da chave ("curso_escritores_admiraveis"). Aceita os dois e mapeia pelo nome.
+// Retorna a chave canônica, ou null se não casar com nenhum serviço real.
+export function resolveServiceKey(value) {
+  if (!value || typeof value !== 'string') return null;
+  const v = value.trim().toLowerCase();
+  if (!v) return null;
+
+  // 1) já é a chave exata
+  if (SERVICOS[value]) return value;
+  // 2) chave normalizada
+  for (const key of Object.keys(SERVICOS)) {
+    if (key.toLowerCase() === v) return key;
+  }
+  // 3) nome EXATO (prioridade sobre parcial, pra não confundir
+  //    "Leitura Crítica" com "Ghost Writer / Leitura Crítica")
+  for (const [key, s] of Object.entries(SERVICOS)) {
+    if ((s.nome || '').toLowerCase() === v) return key;
+  }
+  // 4) o valor contém o nome inteiro do serviço (ex: "quero a LC Books Editora")
+  for (const [key, s] of Object.entries(SERVICOS)) {
+    const nome = (s.nome || '').toLowerCase();
+    if (nome && v.includes(nome)) return key;
+  }
+  // 5) o nome do serviço contém o valor (match parcial, último recurso)
+  for (const [key, s] of Object.entries(SERVICOS)) {
+    const nome = (s.nome || '').toLowerCase();
+    if (nome && nome.includes(v)) return key;
+  }
+  // 6) "assessoria de imprensa" genérico → master_lc (representante do funil divulgar)
+  if (/assessoria\s+de\s+imprensa/.test(v)) return 'master_lc';
+  return null;
+}
+
 // === Mapeamento legado dos 3 funis pro frontend ===
 // Mantém compatibilidade com filtros do dashboard (escrever/publicar/divulgar).
 export const FUNIS = {

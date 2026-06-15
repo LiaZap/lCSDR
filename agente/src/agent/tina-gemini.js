@@ -10,7 +10,7 @@
 
 import { GoogleGenAI, Type } from '@google/genai';
 import { TINA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
-import { SERVICOS } from './knowledge.js';
+import { SERVICOS, resolveServiceKey } from './knowledge.js';
 import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -232,13 +232,16 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
     };
   }
 
-  // Defesa contra hallucination de serviço (mesmo guard dos outros providers)
-  if (parsed.service_recommended && !VALID_SERVICES.has(parsed.service_recommended)) {
-    logger.warn(
-      { invented: parsed.service_recommended },
-      'Tina (Gemini) inventou serviço inexistente — descartando'
-    );
-    parsed.service_recommended = null;
+  // Normaliza service_recommended pra chave canônica (aceita nome OU chave).
+  // Só descarta (e avisa) se NÃO casar com nenhum serviço real do catálogo.
+  if (parsed.service_recommended) {
+    const key = resolveServiceKey(parsed.service_recommended);
+    if (key) {
+      parsed.service_recommended = key;
+    } else {
+      logger.warn({ invented: parsed.service_recommended }, 'Tina (Gemini) citou serviço fora do catálogo — descartando');
+      parsed.service_recommended = null;
+    }
   }
 
   return { ...parsed, usage: meta_usage };
