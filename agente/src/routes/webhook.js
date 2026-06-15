@@ -417,6 +417,18 @@ async function handleInbound(event) {
       db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'handoff_aluno', ?)`)
         .run(fresh.id, JSON.stringify({ to: 'cursos@lcagencia.com.br' }));
 
+    } else if (result.funnel === 'publicar' && (result.handoff || result.stage === 'qualificado') && !result.handoff_mode && !result.book_slot) {
+      // PUBLICAÇÃO: orçamento vai pro e-mail editorial@, não pro agendamento.
+      // Encerra a parte da Tina (handoff por e-mail), pausa pra não ficar dialogando.
+      db.prepare(`
+        UPDATE contacts SET ai_paused = 1, ai_paused_at = CURRENT_TIMESTAMP,
+          stage = 'handoff', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(fresh.id);
+      db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'handoff_publicar', ?)`)
+        .run(fresh.id, JSON.stringify({ to: 'editorial@lcagencia.com.br' }));
+      await markQualifiedAndHandoff(fresh, result, { pause: true }).catch(() => {});
+
     } else if (result.handoff_mode === 'agora') {
       // FALAR AGORA: passa pro próximo consultor da fila, avisa o time e pausa
       // a Tina (humano assume a conversa na hora).

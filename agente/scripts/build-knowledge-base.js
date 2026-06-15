@@ -27,6 +27,12 @@ const DOCS = [
       '- `TINA-QUALIFICADO` = tag aplicada quando o lead qualifica; o SDR/Closer assume a partir daí.',
     ].join('\n'),
   },
+  {
+    type: 'text',
+    file: 'agente/docs/source-material/TINA_Conversas.txt',
+    titulo: 'EXEMPLOS DE CONVERSA FINAIS (versão recomendada, jun/2026) — siga ESTES',
+    legenda: '**Estes são os modelos OFICIAIS e FINAIS de conversa (sem rascunho).** Siga o tom, a estrutura e o roteamento destes exemplos. Onde houver 📋 é instrução interna (não aparece pro lead). Pontos-chave: publicar → e-mail editorial@lcagencia.com.br; divulgar → conectar com especialista (falar agora ou agendar); aluno → cursos@lcagencia.com.br; NUNCA preço.',
+  },
   { type: 'docx', file: '19.05 - Exemplo de conversas.docx',     titulo: 'Exemplos de conversas reais (referência de tom)' },
   { type: 'docx', file: 'Documentação IA_ajustes.docx',          titulo: 'Documentação estratégica da Tina' },
   { type: 'docx', file: 'LC_Manual_Servicos_IA.docx',            titulo: 'Manual oficial de serviços e triagem' },
