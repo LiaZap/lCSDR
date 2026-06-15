@@ -284,6 +284,7 @@ export const LINKS = {
   editora_email: 'contato@lcbookseditora.com.br',
   editorial: 'editorial@lcagencia.com.br',   // orçamento de publicação (LC Books)
   cursos: 'cursos@lcagencia.com.br',          // suporte a alunos do curso
+  assessoria: 'carolina@lcagencia.com.br',    // contato interno assessoria de imprensa
 };
 
 // Resolve o serviço recomendado pela IA pra CHAVE canônica de SERVICOS.

@@ -17,15 +17,9 @@ const OUT = './src/agent/knowledge-base.md';
 const DOCS = [
   {
     type: 'text',
-    file: 'agente/docs/source-material/REV1-treinamento-tina.txt',
-    titulo: 'TREINAMENTO OFICIAL DA TINA — REV.1 (fonte primária, 11/06/2026)',
-    legenda: [
-      '**Como ler os modelos de conversa abaixo:**',
-      '- `A:` = mensagem do Autor (o lead).',
-      '- `T:` = resposta que a Tina deu (exemplo, pode ter erros sinalizados pela equipe).',
-      '- `S:` = **SUGESTÃO da equipe LC de como a Tina DEVERIA responder**. **A linha S é o padrão-ouro.** Quando houver `S:`, siga o estilo e o conteúdo dela, NÃO o da `T:`.',
-      '- `TINA-QUALIFICADO` = tag aplicada quando o lead qualifica; o SDR/Closer assume a partir daí.',
-    ].join('\n'),
+    file: 'agente/docs/source-material/TINA_Treinamento_v2.txt',
+    titulo: 'TREINAMENTO OFICIAL DA TINA — V2 (fonte primária e definitiva, jun/2026)',
+    legenda: '**Este é o guia oficial e COMPLETO da Tina (V2, jun/2026).** É a fonte de verdade sobre missão, identidade, portfólio, fluxo de qualificação, roteamento, modelos de conversa e regras. Os modelos da seção 6 são a versão final recomendada (siga o tom e o roteamento deles). Pontos críticos: NUNCA preço; publicar → editorial@lcagencia.com.br; aluno → cursos@lcagencia.com.br; divulgar → especialista; nunca citar Press/Master.',
   },
   {
     type: 'text',
