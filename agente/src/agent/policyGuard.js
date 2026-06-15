@@ -19,7 +19,9 @@ const ENABLED = process.env.POLICY_GUARD_ENABLED !== 'false';
 
 // Valores que a Tina PODE citar (gate de qualificação + livro público).
 // Qualquer outro valor monetário >= R$ 1.000 é preço de serviço proibido.
-const VALORES_PERMITIDOS = new Set([629, 59.9, 59, 60]);
+// Único valor que a Tina pode citar: o livro público "O Livro Secreto" (R$ 59,90).
+// Qualquer outro número de dinheiro é bloqueado (regra Lilian: nunca preço).
+const VALORES_PERMITIDOS = new Set([59.9, 59, 60]);
 
 // Converte "7.800", "50.000", "1.299,90", "629", "59,90" → Number em reais.
 function parseBRL(raw) {
@@ -31,18 +33,19 @@ function parseBRL(raw) {
   return isNaN(n) ? null : n;
 }
 
-// Detecta menção a PREÇO DE SERVIÇO proibido (qualquer valor >= 1000 que não
-// seja o gate de 629 ou o livro de 59,90). Também pega "X mil reais".
+// Detecta QUALQUER valor de dinheiro proibido. Regra Lilian (15/06): a Tina
+// não fala NENHUM número de dinheiro, exceto o livro público (R$ 59,90).
+// Ou seja: qualquer "R$ X" que não seja o livro é bloqueado.
 function detectPriceLeak(text) {
   if (!text) return false;
 
-  // 1) Valores com R$
+  // 1) Qualquer valor com R$ que não seja o livro (59,90/59/60)
   const reMoney = /R\$\s?([\d][\d.,]*)/gi;
   let m;
   while ((m = reMoney.exec(text)) !== null) {
     const val = parseBRL(m[1]);
     if (val == null) continue;
-    if (val >= 1000 && !VALORES_PERMITIDOS.has(val)) return true;
+    if (!VALORES_PERMITIDOS.has(val)) return true;
   }
 
   // 2) "X mil" perto de contexto financeiro (investimento/valor/custa/reais),
@@ -114,13 +117,14 @@ function allTextOf(result) {
   return parts.join(' ');
 }
 
-// Resposta-cofre quando vaza preço: troca a mensagem inteira pelo gate.
+// Resposta-cofre quando vaza preço: troca a mensagem inteira por uma versão
+// SEM número (o especialista é quem fala valor). Sonda investimento aberto.
 function priceVaultMessage(contact) {
   const nome = contact?.name && !/\d/.test(contact.name) ? contact.name : null;
   const ola = nome ? `${nome}, ` : '';
   return [
-    `${ola}os valores variam conforme o projeto, e quem apresenta a proposta completa é nosso especialista na reunião.`,
-    `Posso adiantar uma coisa: pra investir no seu projeto com parcelamento a partir de R$ 629 por mês, isso faz sentido pra você hoje?`,
+    `${ola}o investimento é personalizado conforme o projeto, e quem apresenta a proposta completa é nosso especialista.`,
+    `Posso te conectar com ele pra detalhar tudo. Você já tem uma ideia de investimento pra esse próximo passo?`,
   ];
 }
 
