@@ -326,7 +326,9 @@ async function handleInbound(event) {
     // pra Tina oferecer. Mais cedo possível, pra não esfriar o lead.
     let extraContext = null;
     if (schedulingEnabled() && fresh.stage === 'agendando') {
-      const slots = await getNextSlots(3);
+      // leque de horários (manhã/tarde, próximos dias) pra atender pedidos
+      // específicos do lead sem inventar. A Tina oferece os mais cedo por padrão.
+      const slots = await getNextSlots(8, { spread: true });
       if (slots.length) {
         extraContext = slotsContextBlock(slots);
         recordOffer(fresh.id, slots);  // guarda qual closer tem cada horário

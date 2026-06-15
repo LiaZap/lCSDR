@@ -29,7 +29,7 @@ async function turn(localId, msg) {
 
   let extraContext = null;
   if (schedulingEnabled() && fresh.stage === 'agendando') {
-    const slots = await getNextSlots(3);
+    const slots = await getNextSlots(8, { spread: true });
     if (slots.length) { extraContext = slotsContextBlock(slots); recordOffer(localId, slots); }
   }
 

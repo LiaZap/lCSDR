@@ -51,46 +51,60 @@ function flattenSlots(raw) {
   return all;
 }
 
-// Puxa os N horários livres mais próximos do agora, OLHANDO TODOS os
-// calendários dos closers. Retorna [{ iso, label, calendarId }] ordenado
-// do mais cedo pro mais tarde, com no máx 1 horário repetido por instante.
-export async function getNextSlots(count = 3, fromDate = new Date()) {
+// Dia (YYYY-MM-DD) de um ISO no fuso configurado, pra agrupar.
+function dayKey(iso) {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: TIMEZONE });
+}
+
+// Puxa horários livres OLHANDO TODOS os calendários dos closers.
+// - spread=false (padrão): os N mais cedo (pra urgência).
+// - spread=true: um LEQUE com cobertura de manhã/tarde de cada dia, nos
+//   próximos dias, pra atender pedidos tipo "amanhã de manhã" / "fim da tarde"
+//   sem a Tina precisar inventar nem jogar pro humano.
+// Retorna [{ iso, label, calendarId }] ordenado do mais cedo pro mais tarde.
+export async function getNextSlots(count = 3, { fromDate = new Date(), spread = false } = {}) {
   if (!schedulingEnabled()) return [];
   const calendarIds = getCalendarIds();
   const startMs = fromDate.getTime();
   const endMs = startMs + LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000;
 
-  // consulta todos os calendários em paralelo
   const results = await Promise.allSettled(calendarIds.map(calendarId =>
     GHL.getFreeSlots(calendarId, { startDate: String(startMs), endDate: String(endMs), timezone: TIMEZONE })
       .then(raw => ({ calendarId, isos: flattenSlots(raw) }))
   ));
 
-  // junta {iso, calendarId} de todos os closers
+  // junta {iso, calendarId}, filtra passado e dedup por instante (1 closer por horário)
   const merged = [];
-  for (const r of results) {
-    if (r.status !== 'fulfilled') {
-      logger.warn({ err: r.reason?.message }, 'falha ao puxar free-slots de um calendário');
-      continue;
-    }
-    for (const iso of r.value.isos) {
-      if (new Date(iso) > fromDate) merged.push({ iso, calendarId: r.value.calendarId });
-    }
-  }
-
-  // ordena por horário (mais cedo primeiro) e dedup por INSTANTE
-  // (se 2 closers têm 14h, oferece só 1 horário 14h, no closer que veio 1º)
-  merged.sort((a, b) => new Date(a.iso) - new Date(b.iso));
   const seen = new Set();
-  const unique = [];
-  for (const s of merged) {
-    const t = new Date(s.iso).getTime();
-    if (seen.has(t)) continue;
-    seen.add(t);
-    unique.push({ iso: s.iso, label: labelForSlot(s.iso), calendarId: s.calendarId });
-    if (unique.length >= count) break;
+  for (const r of results) {
+    if (r.status !== 'fulfilled') { logger.warn({ err: r.reason?.message }, 'falha ao puxar free-slots de um calendário'); continue; }
+    for (const iso of r.value.isos) {
+      const t = new Date(iso).getTime();
+      if (t <= fromDate.getTime() || seen.has(t)) continue;
+      seen.add(t);
+      merged.push({ iso, calendarId: r.value.calendarId });
+    }
   }
-  return unique;
+  merged.sort((a, b) => new Date(a.iso) - new Date(b.iso));
+
+  const pack = s => ({ iso: s.iso, label: labelForSlot(s.iso), calendarId: s.calendarId });
+  if (!spread) return merged.slice(0, count).map(pack);
+
+  // SPREAD: por dia (até 3 dias), pega cedo + meio + fim do dia.
+  const byDay = new Map();
+  for (const s of merged) {
+    const k = dayKey(s.iso);
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(s);
+  }
+  const chosen = [];
+  for (const day of [...byDay.keys()].slice(0, 3)) {
+    const ds = byDay.get(day);
+    const picks = ds.length <= 3 ? ds : [ds[0], ds[Math.floor(ds.length / 2)], ds[ds.length - 1]];
+    chosen.push(...picks);
+  }
+  chosen.sort((a, b) => new Date(a.iso) - new Date(b.iso));
+  return chosen.slice(0, count).map(pack);
 }
 
 // Formata um ISO em rótulo humano PT-BR relativo (hoje/amanhã + hora).
@@ -113,14 +127,15 @@ export function slotsContextBlock(slots) {
   if (!slots || !slots.length) return null;
   const linhas = slots.map((s, i) => `  ${i + 1}. ${s.label}  (ISO: ${s.iso})`).join('\n');
   return `
-HORÁRIOS DISPONÍVEIS PARA AGENDAMENTO (mais próximos do agora, entre os closers disponíveis):
+HORÁRIOS DISPONÍVEIS PARA AGENDAMENTO (entre os closers, próximos dias):
 ${linhas}
 
 REGRAS DE AGENDAMENTO:
-- Ofereça SOMENTE estes horários, do mais próximo pro mais distante. NÃO invente outros.
-- Priorize o mais cedo possível (o lead não pode esfriar).
-- Quando o lead escolher um, devolva o campo "book_slot" com o ISO EXATO daquele horário (copie da lista acima), e confirme na mensagem.
-- Se nenhum servir, ofereça os próximos ou diga que a equipe confirma outro horário.`.trim();
+- Ofereça proativamente os **2-3 mais cedo** desta lista (priorize o quanto antes, o lead não pode esfriar).
+- Se o lead pedir um DIA ou PERÍODO específico ("amanhã de manhã", "fim da tarde", "quinta"), escolha da lista o horário que MELHOR casa com o pedido e ofereça. NÃO invente horário fora da lista.
+- Se NENHUM horário da lista casa com o que o lead quer, seja honesta: ofereça o mais próximo que tem ("o mais perto disso que consigo é X") e, se ainda assim não servir, diga que o especialista confirma um horário sob medida.
+- Quando o lead confirmar um, devolva "book_slot" com o ISO EXATO daquele horário (copie da lista), e confirme na mensagem.
+- NUNCA invente um horário que não está nesta lista.`.trim();
 }
 
 // Registra os horários oferecidos (com o calendário de cada um) pra na hora
