@@ -56,7 +56,7 @@ const TINA_SCHEMA = {
     'reply', 'split', 'funnel', 'service_recommended',
     'stage', 'handoff', 'handoff_reason',
     'qualification_score', 'qualification_notes', 'end_conversation',
-    'course_help', 'book_slot', 'search_book',
+    'course_help', 'book_slot', 'search_book', 'handoff_mode',
   ],
   properties: {
     reply: {
@@ -142,6 +142,10 @@ const TINA_SCHEMA = {
     search_book: {
       anyOf: [{ type: 'string' }, { type: 'null' }],
       description: 'Título do livro (+ autor, se souber) pra o sistema pesquisar o link de venda e confirmar com o lead. Preencha SÓ quando o lead tem livro publicado e informou o título mas não mandou o link. Você NÃO inventa o link, só passa o título. null caso contrário.',
+    },
+    handoff_mode: {
+      anyOf: [{ type: 'string', enum: ['agora', 'agendar'] }, { type: 'null' }],
+      description: 'Como o lead QUALIFICADO quer ser atendido: "agora" = falar com especialista na hora (próximo da fila). "agendar" = marcar horário. null se ainda não decidiu.',
     },
   },
 };

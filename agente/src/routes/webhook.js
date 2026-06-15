@@ -17,7 +17,8 @@ import {
   schedulingEnabled, getNextSlots, slotsContextBlock, bookSlot, recordOffer,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { notifyAgendamento } from '../agent/notify.js';
+import { liveHandoff } from '../agent/queue.js';
+import { notifyAgendamento, notifyLiveHandoff } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
 
 const router = express.Router();
@@ -416,22 +417,33 @@ async function handleInbound(event) {
       db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'handoff_aluno', ?)`)
         .run(fresh.id, JSON.stringify({ to: 'cursos@lcagencia.com.br' }));
 
+    } else if (result.handoff_mode === 'agora') {
+      // FALAR AGORA: passa pro próximo consultor da fila, avisa o time e pausa
+      // a Tina (humano assume a conversa na hora).
+      const lh = await liveHandoff(fresh).catch(err => {
+        logger.error({ err: err.message }, 'liveHandoff falhou'); return { ok: false };
+      });
+      await markQualifiedAndHandoff(fresh, result, { pause: true }).catch(() => {});
+      db.prepare(`
+        UPDATE contacts SET ai_paused = 1, ai_paused_at = CURRENT_TIMESTAMP,
+          stage = 'em_atendimento', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(fresh.id);
+      await notifyLiveHandoff(fresh, { consultant: lh?.consultant, funnel: result.funnel || fresh.funnel });
+
+    } else if (result.handoff_mode === 'agendar' && SCHED) {
+      // AGENDAR: entra em "agendando", MANTÉM a IA ativa pra puxar horários e marcar.
+      db.prepare(`UPDATE contacts SET stage = 'agendando', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(fresh.id);
+      db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(fresh.id);
+      await markQualifiedAndHandoff(fresh, result, { pause: false }).catch(err =>
+        logger.error({ err: err.message }, 'markQualifiedAndHandoff (agendando) falhou'));
+
     } else if (result.handoff || result.stage === 'qualificado') {
-      // Lead qualificou. Se agendamento ON: entra em "agendando" e MANTÉM a IA
-      // ativa pra ela puxar horários e marcar. Se OFF: handoff normal (pausa).
-      if (SCHED) {
-        db.prepare(`
-          UPDATE contacts SET stage = 'agendando', updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `).run(fresh.id);
-        // cancela follow-ups pendentes (a Tina está ativa fechando o horário)
-        db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(fresh.id);
-        // grava custom fields + oportunidade no GHL sem pausar a IA
-        await markQualifiedAndHandoff(fresh, result, { pause: false }).catch(err =>
-          logger.error({ err: err.message }, 'markQualifiedAndHandoff (agendando) falhou'));
-      } else {
-        await markQualifiedAndHandoff(fresh, result);
-      }
+      // Lead qualificou mas ainda NÃO escolheu agora/agendar (Tina acabou de
+      // perguntar "falar agora ou agendar?"). Grava a qualificação e mantém a
+      // IA ATIVA pra receber a escolha no próximo turno.
+      await markQualifiedAndHandoff(fresh, result, { pause: false }).catch(err =>
+        logger.error({ err: err.message }, 'markQualifiedAndHandoff (escolha) falhou'));
 
     } else if (result.stage === 'desqualificado' || result.end_conversation) {
       await markDisqualified(fresh, result);

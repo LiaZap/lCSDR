@@ -73,6 +73,12 @@ const TINA_SCHEMA = {
       nullable: true,
       description: 'Título do livro (+ autor, se souber) pra o sistema pesquisar o link de venda e confirmar com o lead. Preencha SÓ quando o lead disser que tem livro publicado e informar o título, mas não tiver mandado o link. Você NÃO inventa o link, só passa o título aqui. null caso contrário.',
     },
+    handoff_mode: {
+      type: Type.STRING,
+      nullable: true,
+      enum: ['agora', 'agendar'],
+      description: 'Como o lead QUALIFICADO quer ser atendido: "agora" = quer falar com um especialista na hora (vai pro próximo da fila). "agendar" = prefere marcar um horário. null se ainda não perguntou/decidiu.',
+    },
   },
   required: [
     'reply', 'split', 'funnel', 'stage', 'handoff',
@@ -81,7 +87,7 @@ const TINA_SCHEMA = {
   propertyOrdering: [
     'reply', 'split', 'funnel', 'service_recommended', 'stage', 'handoff',
     'handoff_reason', 'qualification_score', 'qualification_notes',
-    'end_conversation', 'course_help', 'book_slot', 'search_book',
+    'end_conversation', 'course_help', 'book_slot', 'search_book', 'handoff_mode',
   ],
 };
 
