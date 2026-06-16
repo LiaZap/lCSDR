@@ -143,7 +143,10 @@ function extractTags(ghlContact) {
 //      (cruzamento com nossa base; se não bate, assume API e não pausa)
 //   3. A mensagem outbound do GHL tem que ser mais nova que o nosso
 //      contacts.last_outbound_at (com tolerância de 5s), senão foi nossa
-const AUTO_HUMAN_DETECTION = process.env.AUTO_HUMAN_DETECTION_ENABLED === 'true';
+// Default ON agora que a Tina atende TODOS os leads (tag automática ligada):
+// é a rede que pega o caso "humano respondeu mas não atribuiu". Desliga com
+// AUTO_HUMAN_DETECTION_ENABLED=false. Tem sanity checks contra auto-pausa.
+const AUTO_HUMAN_DETECTION = process.env.AUTO_HUMAN_DETECTION_ENABLED !== 'false';
 
 function isKnownSdrUserId(userId) {
   if (!userId) return false;
@@ -228,6 +231,27 @@ async function handleInbound(event) {
   }
 
   const contact = upsertContactFromGHL(ghlContact);
+
+  // 1.55) LEAD JÁ EM ATENDIMENTO HUMANO: se o contato já está ATRIBUÍDO a um
+  // consultor no GHL (assignedTo), um humano já é o dono da conversa — a Tina
+  // NÃO atropela. Cobre os leads ANTIGOS que já estavam sendo atendidos quando
+  // a tag tina-liberada foi ligada em massa. Leads novos chegam SEM assignedTo,
+  // então a Tina atende normalmente até alguém assumir.
+  // Desligável com TINA_RESPOND_IF_ASSIGNED=true (não recomendado).
+  const assignedTo = ghlContact?.assignedTo || ghlContact?.assigned_to || ghlContact?.assignedUserId;
+  const RESPOND_IF_ASSIGNED = process.env.TINA_RESPOND_IF_ASSIGNED === 'true';
+  if (assignedTo && !RESPOND_IF_ASSIGNED) {
+    // pausa local pra próximos webhooks já caírem no fast-skip (ai_paused)
+    if (!contact.ai_paused) {
+      db.prepare(`UPDATE contacts SET ai_paused = 1, ai_paused_at = CURRENT_TIMESTAMP,
+        assigned_sdr_id = COALESCE(assigned_sdr_id, (SELECT id FROM sdr_users WHERE ghl_user_id = ?)),
+        updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(String(assignedTo), contact.id);
+      db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_ja_atribuido', ?)`)
+        .run(contact.id, JSON.stringify({ assignedTo }));
+    }
+    logger.info({ ghlContactId, assignedTo }, 'lead já atribuído a humano, Tina não responde');
+    return;
+  }
 
   // 1.6) DETECÇÃO AUTOMÁTICA (Plano B) — verifica se humano respondeu pelo GHL
   // antes da Tina. Default OFF (env AUTO_HUMAN_DETECTION_ENABLED=true pra ligar).
