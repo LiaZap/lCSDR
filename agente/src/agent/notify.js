@@ -35,11 +35,11 @@ export async function notifyLiveHandoff(contact, { consultant, funnel }) {
   }
 }
 
-export async function notifyAgendamento(contact, { label, iso, funnel }) {
+export async function notifyAgendamento(contact, { label, iso, funnel, calendarId }) {
   // Registra sempre no log interno
   try {
     db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'reuniao_agendada', ?)`)
-      .run(contact.id, JSON.stringify({ label, iso, funnel }));
+      .run(contact.id, JSON.stringify({ label, iso, funnel, calendarId }));
   } catch (err) {
     logger.error({ err: err.message, contactId: contact.id }, 'falha ao registrar evento de agendamento');
   }

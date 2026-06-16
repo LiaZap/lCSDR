@@ -215,7 +215,7 @@ export async function bookSlot(contact, iso, { title, notes, assignedUserId } = 
       ...(assignedUserId ? { assignedUserId } : {}),
     });
     logger.info({ contactId: contact.id, iso, calendarId, apptId: res?.id || res?.appointment?.id }, 'reunião agendada no GHL');
-    return { ok: true, label: labelForSlot(iso), appointment: res };
+    return { ok: true, label: labelForSlot(iso), calendarId, appointment: res };
   } catch (err) {
     logger.error({ err: err.message, contactId: contact.id, iso, calendarId }, 'falha ao agendar no GHL');
     return { ok: false, error: err.message };

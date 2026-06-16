@@ -447,7 +447,7 @@ async function handleInbound(event) {
         WHERE id = ?
       `).run(fresh.id);
       db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(fresh.id);
-      await notifyAgendamento(fresh, { label: booked.label, iso: result.book_slot, funnel: result.funnel || fresh.funnel });
+      await notifyAgendamento(fresh, { label: booked.label, iso: result.book_slot, funnel: result.funnel || fresh.funnel, calendarId: booked.calendarId });
 
     } else if (result.course_help === 'aluno' && result.end_conversation) {
       // CASO ESPECIAL: aluno com dúvida de curso NÃO é "desqualificado".
