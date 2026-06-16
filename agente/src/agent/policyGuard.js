@@ -61,8 +61,11 @@ function detectPriceLeak(text) {
 
 // Correções cirúrgicas que mantêm a mensagem (regex → substituição).
 const FIXES = [
-  // Master/Press LC → Assessoria de Imprensa (a modalidade quem decide é o Closer)
-  { re: /\b(Master|Press)\s*LC\b/gi, to: 'Assessoria de Imprensa', tag: 'master_press' },
+  // Master/Press LC → descrição genérica por DURAÇÃO (preserva comparação:
+  // se trocasse os 2 pelo mesmo termo, viraria "Assessoria vs Assessoria").
+  // Master = longa duração / Press = curta duração. Quem nomeia é o Closer.
+  { re: /\bMaster\s*LC\b/gi, to: 'a Assessoria de Imprensa de longa duração', tag: 'master_press' },
+  { re: /\bPress\s*LC\b/gi, to: 'a Assessoria de Imprensa de curta duração', tag: 'master_press' },
   // Veículos específicos → genérico (sem quebrar "Café com Deus Pai" etc)
   { re: /\b(Globo|CNN|Folha de S\.?\s?Paulo|Folha|Veja|Record|SBT|Band)\b/g, to: 'grandes veículos', tag: 'veiculo_especifico' },
   // "custo(s)" → "investimento(s)"
@@ -92,6 +95,8 @@ function applyFixesToText(text, violations) {
   }
   // colapsa repetição criada pela substituição ("grandes veículos e grandes veículos")
   out = out.replace(/grandes ve[íi]culos(\s*[,e]+\s*grandes ve[íi]culos)+/gi, 'grandes veículos');
+  // colapsa artigo duplicado criado pela substituição ("a a Assessoria" → "a Assessoria")
+  out = out.replace(/\b([aoAO])\s+(a|o)\s+(Assessoria)/g, '$2 $3');
   // normaliza espaços que sobraram de remoções
   return out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:!?])/g, '$1').trim();
 }
