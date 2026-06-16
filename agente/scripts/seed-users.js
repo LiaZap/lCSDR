@@ -14,10 +14,12 @@ const USERS = [
   { name: 'Gabriel',     email: 'gabriel@lcagencia.com.br',     password: 'LCagencia2026', role: 'sdr' },
   { name: 'Andressa',    email: 'andressa@lcagencia.com.br',    password: 'LCagencia2026', role: 'closer' },
   { name: 'Brenda',      email: 'brenda@lcagencia.com.br',      password: 'LCagencia2026', role: 'admin' },
-  { name: 'Bruna Menel', email: 'brunamenel@lcagencia.com.br',  password: 'LCagencia2026', role: 'sdr' },
-  { name: 'Neto',        email: 'neto@lcagencia.com.br',        password: 'LCagencia2026', role: 'sdr' },
-  { name: 'Nataly',      email: 'nataly@lcagencia.com.br',      password: 'LCagencia2026', role: 'sdr' },
+  // Consultores/closers (rodízio da fila + atendem leads)
+  { name: 'Bruna Menel', email: 'brunamenel@lcagencia.com.br',  password: 'LCagencia2026', role: 'closer' },
+  { name: 'Nataly',      email: 'nataly@lcagencia.com.br',      password: 'LCagencia2026', role: 'closer' },
   { name: 'Victor',      email: 'victor@lcagencia.com.br',      password: 'LCagencia2026', role: 'closer' },
+  { name: 'Fernanda Vieira', email: 'fernanda@lcagencia.com.br', password: 'LCagencia2026', role: 'closer' },
+  { name: 'Neto',        email: 'neto@lcagencia.com.br',        password: 'LCagencia2026', role: 'sdr' },
   { name: 'Isabella',    email: 'isabella@lcagencia.com.br',    password: 'LCagencia2026', role: 'admin' },
 
   // BEP (executor do projeto)
