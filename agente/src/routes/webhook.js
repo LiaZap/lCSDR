@@ -122,6 +122,14 @@ const REQUIRED_TAG_ENABLED = REQUIRED_TAG && REQUIRED_TAG !== 'false' && REQUIRE
 // e pausa sozinho.
 const PAUSE_TAG = (process.env.GHL_TAG_PAUSAR_TINA || 'tina-pausada').toLowerCase();
 
+// Tags de ORIGEM bloqueadas: se o contato tiver QUALQUER uma delas, a Tina
+// NÃO responde. Decisão Lilian: a Tina não atende leads do FORMULÁRIO DO SITE,
+// só Meta + WhatsApp. Configurável por env (CSV), ex:
+//   GHL_TAG_BLOCK=lc-lca,lc-lce,form-site
+// Vazio = nenhum bloqueio por origem.
+const BLOCK_TAGS = (process.env.GHL_TAG_BLOCK || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
 function extractTags(ghlContact) {
   const raw = ghlContact?.tags || [];
   return raw.map(t => (typeof t === 'string' ? t : (t?.name || ''))).map(s => s.toLowerCase()).filter(Boolean);
@@ -222,6 +230,16 @@ async function handleInbound(event) {
   if (REQUIRED_TAG_ENABLED && !tags.includes(REQUIRED_TAG)) {
     logger.info({ ghlContactId, required: REQUIRED_TAG }, 'contato sem tag de liberação, Tina não responde');
     return;
+  }
+
+  // 1.45) BLOQUEIO POR ORIGEM: Tina não atende leads de origem bloqueada
+  // (ex: formulário do site). Só Meta + WhatsApp. Lilian, jun/2026.
+  if (BLOCK_TAGS.length) {
+    const hit = BLOCK_TAGS.find(t => tags.includes(t));
+    if (hit) {
+      logger.info({ ghlContactId, blockedBy: hit }, 'lead de origem bloqueada (ex: form do site), Tina não responde');
+      return;
+    }
   }
 
   // 1.5) Checa tag de pausa manual (Plano A) — time aplicou tag pra assumir
