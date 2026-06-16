@@ -56,43 +56,21 @@ function dayKey(iso) {
   return new Date(iso).toLocaleDateString('en-CA', { timeZone: TIMEZONE });
 }
 
-// Puxa horários livres OLHANDO TODOS os calendários dos closers.
-// - spread=false (padrão): os N mais cedo (pra urgência).
-// - spread=true: um LEQUE com cobertura de manhã/tarde de cada dia, nos
-//   próximos dias, pra atender pedidos tipo "amanhã de manhã" / "fim da tarde"
-//   sem a Tina precisar inventar nem jogar pro humano.
-// Retorna [{ iso, label, calendarId }] ordenado do mais cedo pro mais tarde.
-export async function getNextSlots(count = 3, { fromDate = new Date(), spread = false } = {}) {
-  if (!schedulingEnabled()) return [];
-  const calendarIds = getCalendarIds();
-  const startMs = fromDate.getTime();
-  const endMs = startMs + LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000;
+// Índice de rodízio do agendamento: distribui os leads entre os consultores
+// (a "roleta" que a Lilian pediu). Avança a cada reunião agendada. Como todos
+// os closers têm a MESMA grade de horário, sem isso todo lead cairia no 1º da
+// lista (sempre o mesmo consultor). Rotaciona pra dividir de forma justa.
+function rotationStart(n) {
+  try {
+    const row = db.prepare("SELECT COUNT(*) AS c FROM events_log WHERE kind = 'reuniao_agendada'").get();
+    return (row?.c || 0) % n;
+  } catch { return 0; }
+}
 
-  const results = await Promise.allSettled(calendarIds.map(calendarId =>
-    GHL.getFreeSlots(calendarId, { startDate: String(startMs), endDate: String(endMs), timezone: TIMEZONE })
-      .then(raw => ({ calendarId, isos: flattenSlots(raw) }))
-  ));
-
-  // junta {iso, calendarId}, filtra passado e dedup por instante (1 closer por horário)
-  const merged = [];
-  const seen = new Set();
-  for (const r of results) {
-    if (r.status !== 'fulfilled') { logger.warn({ err: r.reason?.message }, 'falha ao puxar free-slots de um calendário'); continue; }
-    for (const iso of r.value.isos) {
-      const t = new Date(iso).getTime();
-      if (t <= fromDate.getTime() || seen.has(t)) continue;
-      seen.add(t);
-      merged.push({ iso, calendarId: r.value.calendarId });
-    }
-  }
-  merged.sort((a, b) => new Date(a.iso) - new Date(b.iso));
-
-  const pack = s => ({ iso: s.iso, label: labelForSlot(s.iso), calendarId: s.calendarId });
-  if (!spread) return merged.slice(0, count).map(pack);
-
-  // SPREAD: por dia (até 3 dias), pega cedo + meio + fim do dia.
+// Pega um spread (cedo/meio/fim de cada dia, até 3 dias) de uma lista de slots.
+function spreadPick(slots, count) {
   const byDay = new Map();
-  for (const s of merged) {
+  for (const s of slots) {
     const k = dayKey(s.iso);
     if (!byDay.has(k)) byDay.set(k, []);
     byDay.get(k).push(s);
@@ -104,7 +82,50 @@ export async function getNextSlots(count = 3, { fromDate = new Date(), spread = 
     chosen.push(...picks);
   }
   chosen.sort((a, b) => new Date(a.iso) - new Date(b.iso));
-  return chosen.slice(0, count).map(pack);
+  return chosen.slice(0, count);
+}
+
+// Puxa horários livres dos closers, com RODÍZIO entre eles (roleta).
+// Cada lead é atendido por um consultor da vez; oferece os horários DELE.
+// Se o consultor da vez não tiver horário, passa pro próximo da roleta.
+// Retorna [{ iso, label, calendarId }] de UM consultor, ordenado.
+export async function getNextSlots(count = 3, { fromDate = new Date(), spread = true } = {}) {
+  if (!schedulingEnabled()) return [];
+  const calendarIds = getCalendarIds();
+  const startMs = fromDate.getTime();
+  const endMs = startMs + LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000;
+
+  const results = await Promise.allSettled(calendarIds.map(calendarId =>
+    GHL.getFreeSlots(calendarId, { startDate: String(startMs), endDate: String(endMs), timezone: TIMEZONE })
+      .then(raw => ({ calendarId, isos: flattenSlots(raw) }))
+  ));
+
+  // mapa calendarId → slots futuros ordenados
+  const byCal = new Map();
+  for (const r of results) {
+    if (r.status !== 'fulfilled') { logger.warn({ err: r.reason?.message }, 'falha ao puxar free-slots de um calendário'); continue; }
+    const list = r.value.isos
+      .filter(iso => new Date(iso).getTime() > fromDate.getTime())
+      .sort()
+      .map(iso => ({ iso, calendarId: r.value.calendarId }));
+    if (list.length) byCal.set(r.value.calendarId, list);
+  }
+  if (!byCal.size) return [];
+
+  const pack = s => ({ iso: s.iso, label: labelForSlot(s.iso), calendarId: s.calendarId });
+
+  // RODÍZIO: começa pelo consultor da vez, oferece os horários DELE.
+  // Pula quem não tiver horário, na ordem da roleta.
+  const start = rotationStart(calendarIds.length);
+  for (let i = 0; i < calendarIds.length; i++) {
+    const cid = calendarIds[(start + i) % calendarIds.length];
+    const slots = byCal.get(cid);
+    if (slots && slots.length) {
+      const picked = spread ? spreadPick(slots, count) : slots.slice(0, count);
+      return picked.map(pack);
+    }
+  }
+  return [];
 }
 
 // Formata um ISO em rótulo humano PT-BR relativo (hoje/amanhã + hora).
