@@ -34,19 +34,28 @@ export function upsertContactFromGHL(ghlContact) {
 }
 
 export function recordInbound(contactId, { content, content_type = 'text', ghl_message_id = null, attachment_url = null } = {}) {
-  // better-sqlite3 NÃO aceita `undefined` em parâmetro (estoura "Too few
-  // parameter values"). Coage tudo pra valor seguro — robusto contra áudio/
-  // imagem/anexos sem body, ou campos ausentes no payload do GHL.
-  db.prepare(`
-    INSERT INTO messages (contact_id, ghl_message_id, direction, author, content, content_type, raw_attachment_url)
-    VALUES (?, ?, 'inbound', 'lead', ?, ?, ?)
-  `).run(
+  // A versão do better-sqlite3 no container REJEITA `undefined` ("Too few
+  // parameter values") — diferente da local, que aceita. Então montamos o
+  // array de valores, coagimos TODO undefined p/ null e usamos spread (garante
+  // exatamente 5 args, elimina erro de contagem). O log abaixo revela qual
+  // campo estava undefined, pra achar a causa raiz sem ficar no escuro.
+  const vals = [
     contactId,
     ghl_message_id ?? null,
     content ?? '',
     content_type ?? 'text',
     attachment_url ?? null,
-  );
+  ];
+  const undefIdx = vals.findIndex(v => v === undefined);
+  if (undefIdx !== -1) {
+    const campo = ['contactId', 'ghl_message_id', 'content', 'content_type', 'attachment_url'][undefIdx];
+    logger.warn({ campo, contactId, content_type }, 'recordInbound: parâmetro undefined coagido p/ null');
+    vals[undefIdx] = null;
+  }
+  db.prepare(`
+    INSERT INTO messages (contact_id, ghl_message_id, direction, author, content, content_type, raw_attachment_url)
+    VALUES (?, ?, 'inbound', 'lead', ?, ?, ?)
+  `).run(...vals);
   db.prepare('UPDATE contacts SET last_inbound_at = CURRENT_TIMESTAMP WHERE id = ?').run(contactId);
   // Lead respondeu → cancela follow-ups pendentes desse contato.
   // Não faz sentido mandar "dei uma sumida" pra quem acabou de falar.
