@@ -279,9 +279,19 @@ async function handleInbound(event) {
 
   // Detecta attachments por URL (GHL manda array de strings URL ou objetos)
   const attachList = attachments.map(a => typeof a === 'string' ? { url: a } : a);
-  const audioAtt = attachList.find(a => /\.(ogg|opus|mp3|m4a|wav)(\?|$)/i.test(a.url || ''));
-  const pdfAtt = attachList.find(a => /\.(pdf|doc|docx)(\?|$)/i.test(a.url || ''));
-  const imageAtt = attachList.find(a => /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(a.url || ''));
+  // tipo declarado pelo GHL no objeto do anexo (varia: type/mimeType/contentType)
+  const attType = a => String(a.type || a.mimeType || a.contentType || a.format || '').toLowerCase();
+  const audioAtt = attachList.find(a => /\.(ogg|opus|mp3|m4a|wav|amr|aac|mpeg)(\?|$)/i.test(a.url || '') || /audio|voice|ptt|ogg|opus|mpeg/.test(attType(a)));
+  const pdfAtt = attachList.find(a => /\.(pdf|doc|docx)(\?|$)/i.test(a.url || '') || /pdf|msword|document/.test(attType(a)));
+  const imageAtt = attachList.find(a => /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(a.url || '') || /image/.test(attType(a)));
+
+  // Fallback de áudio: o WhatsApp manda a nota de voz como anexo SEM extensão na
+  // URL e o GHL não marca o tipo de conteúdo em `messageType` (lá vem o canal,
+  // ex.: "WhatsApp"). Então: anexo presente, sem texto e que não é imagem/PDF →
+  // trata como áudio. O Whisper identifica o formato pelo conteúdo do arquivo.
+  const looksLikeAudio = audioAtt
+    || /audio|voice|ptt/.test(msgType)
+    || (attachList.length > 0 && !imageAtt && !pdfAtt && !body.trim());
 
   // PDF → bloquear (não analisar via IA, delegar à leitura crítica)
   if (pdfAtt) {
@@ -299,13 +309,14 @@ async function handleInbound(event) {
   }
 
   // Áudio → baixa (com auth GHL) e transcreve
-  if (audioAtt || msgType === 'audio') {
+  if (looksLikeAudio) {
     const url = audioAtt?.url || attachList[0]?.url;
-    attachment_url = url;
+    attachment_url = url || null;
+    logger.info({ ghlContactId, url, msgType, attCount: attachList.length }, 'mensagem detectada como ÁUDIO, transcrevendo');
     try {
       const buf = url ? await downloadAttachment(url) : null;
       const transcript = buf ? await transcribeAudioBuffer(buf) : null;
-      content = transcript || '[áudio recebido — falha na transcrição]';
+      content = transcript ? `[áudio transcrito] ${transcript}` : '[áudio recebido — falha na transcrição]';
       content_type = 'audio_transcript';
     } catch (err) {
       logger.error({ err: err.message }, 'falha baixando/transcrevendo áudio');

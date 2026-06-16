@@ -33,11 +33,20 @@ export function upsertContactFromGHL(ghlContact) {
   return db.prepare('SELECT * FROM contacts WHERE id = ?').get(info.lastInsertRowid);
 }
 
-export function recordInbound(contactId, { content, content_type = 'text', ghl_message_id = null, attachment_url = null }) {
+export function recordInbound(contactId, { content, content_type = 'text', ghl_message_id = null, attachment_url = null } = {}) {
+  // better-sqlite3 NÃO aceita `undefined` em parâmetro (estoura "Too few
+  // parameter values"). Coage tudo pra valor seguro — robusto contra áudio/
+  // imagem/anexos sem body, ou campos ausentes no payload do GHL.
   db.prepare(`
     INSERT INTO messages (contact_id, ghl_message_id, direction, author, content, content_type, raw_attachment_url)
     VALUES (?, ?, 'inbound', 'lead', ?, ?, ?)
-  `).run(contactId, ghl_message_id, content, content_type, attachment_url);
+  `).run(
+    contactId,
+    ghl_message_id ?? null,
+    content ?? '',
+    content_type ?? 'text',
+    attachment_url ?? null,
+  );
   db.prepare('UPDATE contacts SET last_inbound_at = CURRENT_TIMESTAMP WHERE id = ?').run(contactId);
   // Lead respondeu → cancela follow-ups pendentes desse contato.
   // Não faz sentido mandar "dei uma sumida" pra quem acabou de falar.
