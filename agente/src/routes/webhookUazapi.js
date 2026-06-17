@@ -104,6 +104,15 @@ router.post('/uazapi', async (req, res) => {
       return;
     }
 
+    // Ignora mensagens de GRUPO. A Tina é 1:1 e NUNCA responde em grupo. O
+    // número uazapi participa do grupo interno do time (avisos de agendamento/
+    // handoff), então mensagens de grupo chegam aqui — não pode virar conversa.
+    const chatId = String(msg.chatid || chat.wa_chatid || chat.id || '');
+    if (chatId.includes('@g.us') || msg.isGroup === true || chat.isGroup === true) {
+      logger.info({ chatId }, 'webhook uazapi: mensagem de GRUPO, ignorando (Tina é 1:1)');
+      return;
+    }
+
     // Aceita: EventType "messages" (uazapi padrão), ou qualquer evento que
     // tenha shape de mensagem (message.text + message.chatid)
     const isMessageEvent = eventType === 'messages'

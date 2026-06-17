@@ -6,7 +6,34 @@
 
 import { db } from '../db/index.js';
 import { GHL } from '../ghl/client.js';
+import { UAZAPI } from '../uazapi/client.js';
 import { logger } from '../utils/logger.js';
+
+// Grupo interno do time no WhatsApp (JID uazapi, ex.: "1203...@g.us"). O
+// WhatsApp oficial (Meta) é 1:1 e NÃO posta em grupo; o número uazapi participa
+// do grupo e manda os avisos. Setar UAZAPI_NOTIFY_GROUP no .env pra ativar.
+const NOTIFY_GROUP = process.env.UAZAPI_NOTIFY_GROUP || '';
+
+// Manda o aviso pro grupo do time via uazapi (não-bloqueante).
+async function notifyGroupUazapi(text) {
+  if (!NOTIFY_GROUP || !process.env.UAZAPI_TOKEN) return;
+  try {
+    await UAZAPI.sendText(NOTIFY_GROUP, text);
+  } catch (err) {
+    logger.error({ err: err.message }, 'falha ao avisar grupo via uazapi');
+  }
+}
+
+// Aviso opcional via contato GHL (caminho antigo; só se AGENDA_NOTIFY_CONTACT_ID).
+async function notifyContactGHL(msg) {
+  const notifyId = process.env.AGENDA_NOTIFY_CONTACT_ID;
+  if (!notifyId || !process.env.GHL_API_TOKEN) return;
+  try {
+    await GHL.sendMessage({ contactId: notifyId, message: msg, type: 'WhatsApp' });
+  } catch (err) {
+    logger.error({ err: err.message }, 'falha ao notificar contato GHL');
+  }
+}
 
 // Aviso de "lead quer falar AGORA" pro time / consultor da vez.
 export async function notifyLiveHandoff(contact, { consultant, funnel }) {
@@ -17,9 +44,6 @@ export async function notifyLiveHandoff(contact, { consultant, funnel }) {
     logger.error({ err: err.message, contactId: contact.id }, 'falha ao registrar aviso de live handoff');
   }
 
-  const notifyId = process.env.AGENDA_NOTIFY_CONTACT_ID;
-  if (!notifyId || !process.env.GHL_API_TOKEN) return;
-
   const nome = contact.name || 'Lead';
   const tel = contact.phone || '';
   const quem = consultant?.name ? `→ ${consultant.name}` : '(próximo da fila)';
@@ -28,11 +52,8 @@ export async function notifyLiveHandoff(contact, { consultant, funnel }) {
     + `Funil: ${funnel || '-'}\n`
     + `Assumir a conversa no WhatsApp o quanto antes.`;
 
-  try {
-    await GHL.sendMessage({ contactId: notifyId, message: msg, type: 'WhatsApp' });
-  } catch (err) {
-    logger.error({ err: err.message }, 'falha ao notificar fila de atendimento');
-  }
+  await notifyGroupUazapi(msg);
+  await notifyContactGHL(msg);
 }
 
 export async function notifyAgendamento(contact, { label, iso, funnel, calendarId }) {
@@ -44,10 +65,6 @@ export async function notifyAgendamento(contact, { label, iso, funnel, calendarI
     logger.error({ err: err.message, contactId: contact.id }, 'falha ao registrar evento de agendamento');
   }
 
-  // Aviso opcional no grupo/contato do time
-  const notifyId = process.env.AGENDA_NOTIFY_CONTACT_ID;
-  if (!notifyId || !process.env.GHL_API_TOKEN) return;
-
   const nome = contact.name || 'Lead';
   const tel = contact.phone || '';
   const msg = `🗓️ Nova reunião agendada pela Tina\n`
@@ -55,9 +72,6 @@ export async function notifyAgendamento(contact, { label, iso, funnel, calendarI
     + `Funil: ${funnel || '-'}\n`
     + `Horário: ${label}`;
 
-  try {
-    await GHL.sendMessage({ contactId: notifyId, message: msg, type: 'WhatsApp' });
-  } catch (err) {
-    logger.error({ err: err.message }, 'falha ao notificar grupo de agendamento');
-  }
+  await notifyGroupUazapi(msg);
+  await notifyContactGHL(msg);
 }
