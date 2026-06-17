@@ -97,6 +97,16 @@ router.post('/uazapi', async (req, res) => {
   // Resposta rápida — processa assíncrono
   res.status(200).json({ ok: true });
 
+  // KILL SWITCH: por padrão a Tina NÃO atende leads pelo uazapi. O canal de
+  // lead é o GHL/Meta oficial; este número uazapi serve SÓ pra ENVIAR avisos no
+  // grupo. Sem isso, se o webhook do uazapi apontar pro lcsdr, a Tina começa a
+  // responder leads pelo número errado. Pra ligar o atendimento por uazapi um
+  // dia: UAZAPI_INBOUND_ENABLED=true.
+  if (process.env.UAZAPI_INBOUND_ENABLED !== 'true') {
+    logger.info({ chatid: msg.chatid || chat.wa_chatid }, 'webhook uazapi: inbound DESATIVADO (só avisos no grupo) — ignorando mensagem');
+    return;
+  }
+
   try {
     // Ignora mensagens enviadas por mim mesmo
     if (msg.fromMe === true || msg.wasSentByApi === true) {
