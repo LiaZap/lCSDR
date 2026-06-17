@@ -52,10 +52,31 @@ export function recordInbound(contactId, { content, content_type = 'text', ghl_m
     logger.warn({ campo, contactId, content_type }, 'recordInbound: parâmetro undefined coagido p/ null');
     vals[undefIdx] = null;
   }
-  db.prepare(`
+  const stmt = db.prepare(`
     INSERT INTO messages (contact_id, ghl_message_id, direction, author, content, content_type, raw_attachment_url)
     VALUES (?, ?, 'inbound', 'lead', ?, ?, ?)
-  `).run(...vals);
+  `);
+  try {
+    stmt.run(...vals);
+  } catch (e) {
+    // Diagnóstico: mostra a SQL real e cada valor/tipo pra achar a causa do
+    // "Too few parameter values" (que NÃO deveria acontecer com 5 args).
+    logger.error({
+      err: e.message,
+      sql: stmt.source,
+      valsLen: vals.length,
+      tipos: vals.map(v => v === undefined ? 'undefined' : v === null ? 'null' : typeof v),
+      preview: vals.map(v => String(v ?? '').slice(0, 30)),
+    }, 'recordInbound INSERT falhou — diagnóstico');
+    // Fallback: grava o mínimo com primitivos garantidos pra NÃO derrubar o
+    // webhook (Tina continua respondendo). Não relança o erro.
+    try {
+      db.prepare(`INSERT INTO messages (contact_id, direction, author, content, content_type) VALUES (?, 'inbound', 'lead', ?, ?)`)
+        .run(contactId, String(content ?? ''), String(content_type ?? 'text'));
+    } catch (e2) {
+      logger.error({ err: e2.message }, 'recordInbound fallback também falhou');
+    }
+  }
   db.prepare('UPDATE contacts SET last_inbound_at = CURRENT_TIMESTAMP WHERE id = ?').run(contactId);
   // Lead respondeu → cancela follow-ups pendentes desse contato.
   // Não faz sentido mandar "dei uma sumida" pra quem acabou de falar.
