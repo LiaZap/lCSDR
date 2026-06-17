@@ -58,7 +58,12 @@ export async function createOrMoveOpportunityQualified(contact, { funnel, score,
     const opp = existing?.opportunities?.[0] || existing?.[0];
 
     if (opp) {
+      // Manda `pipelineId` junto: sem ele, o GHL valida o stage contra o
+      // pipeline ATUAL da oportunidade — se ela estiver em outro pipeline (ex.:
+      // já foi movida pros Closers), o stage não bate e dá 400. Com o
+      // pipelineId, move a oportunidade pro pipeline configurado.
       await GHL.updateOpportunity(opp.id, {
+        pipelineId,
         pipelineStageId: stageQualified,
         status: 'open',
         ...(score ? { monetaryValue: estimateTicket(funnel, score) } : {}),
