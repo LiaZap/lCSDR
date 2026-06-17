@@ -183,6 +183,34 @@ function extractTags(ghlContact) {
 // AUTO_HUMAN_DETECTION_ENABLED=true (precisa link-ghl-users rodado).
 const AUTO_HUMAN_DETECTION = process.env.AUTO_HUMAN_DETECTION_ENABLED === 'true';
 
+// Filtro LEAD NOVO vs. JÁ EM ATENDIMENTO (pedido do Gabriel: o GHL não filtra
+// reentrada). Default ON. Só roda no PRIMEIRO contato (Tina nunca respondeu o
+// lead) e checa se a conversa do GHL já tem saída de um humano. Falha aberto.
+const SKIP_IN_ATTENDANCE = process.env.SKIP_LEADS_IN_ATTENDANCE !== 'false';
+
+// True se a conversa do GHL JÁ tem alguma mensagem de SAÍDA com userId — ou
+// seja, um humano já enviou algo pela UI/app do GHL (lead em atendimento).
+// Nossas mensagens via API (PIT) não têm userId, então não contam como humano.
+async function conversationAlreadyInAttendance(ghlContactId) {
+  if (!process.env.GHL_API_TOKEN) return false;
+  try {
+    const convResp = await GHL.searchConversations(ghlContactId);
+    const conv = convResp?.conversations?.[0] || convResp?.[0];
+    if (!conv?.id) return false;
+    const msgsResp = await GHL.getMessages(conv.id, { limit: 25 });
+    const msgs = msgsResp?.messages?.messages || msgsResp?.messages || msgsResp || [];
+    if (!Array.isArray(msgs) || !msgs.length) return false;
+    return msgs.some(m => {
+      const dir = (m.direction || '').toLowerCase();
+      const uid = m.userId || m.user_id || m.sentBy?.id;
+      return dir === 'outbound' && Boolean(uid);
+    });
+  } catch (err) {
+    logger.warn({ err: err.message, ghlContactId }, 'falha checando atendimento prévio; segue normal');
+    return false;
+  }
+}
+
 function isKnownSdrUserId(userId) {
   if (!userId) return false;
   const row = db.prepare('SELECT id FROM sdr_users WHERE ghl_user_id = ?').get(String(userId));
@@ -276,6 +304,18 @@ async function handleInbound(event) {
   }
 
   const contact = upsertContactFromGHL(ghlContact);
+
+  // 1.55) FILTRO LEAD NOVO vs. EM ATENDIMENTO (Gabriel não consegue filtrar
+  // reentrada no GHL). Só no PRIMEIRO contato da Tina (ela nunca respondeu este
+  // lead): se a conversa do GHL já tem saída de um humano, o lead JÁ estava em
+  // atendimento → a Tina não assume. Não atrapalha conversas que ela já toca.
+  if (SKIP_IN_ATTENDANCE && !contact.last_outbound_at) {
+    if (await conversationAlreadyInAttendance(ghlContactId)) {
+      logger.info({ ghlContactId, contactId: contact.id }, 'lead já estava em atendimento humano (conversa pré-existente), Tina não assume');
+      handleSDRReply(contact.id, null);
+      return;
+    }
+  }
 
   // NOTA: NÃO bloquear por assignedTo. O GHL auto-atribui o lead a um consultor
   // já na ENTRADA (round-robin), então assignedTo vem preenchido em todo lead
