@@ -187,10 +187,14 @@ const AUTO_HUMAN_DETECTION = process.env.AUTO_HUMAN_DETECTION_ENABLED === 'true'
 // reentrada). Default ON. Só roda no PRIMEIRO contato (Tina nunca respondeu o
 // lead) e checa se a conversa do GHL já tem saída de um humano. Falha aberto.
 const SKIP_IN_ATTENDANCE = process.env.SKIP_LEADS_IN_ATTENDANCE !== 'false';
+// Janela: só conta como "em atendimento" se o humano falou nos últimos N dias.
+// Evita bloquear lead FRIO antigo (humano falou há meses, lead sumiu e voltou —
+// é oportunidade nova pra Tina). Configurável; 0/negativo = sem janela (qualquer idade).
+const ATTENDANCE_DAYS = Number(process.env.SKIP_ATTENDANCE_DAYS || 30);
 
-// True se a conversa do GHL JÁ tem alguma mensagem de SAÍDA com userId — ou
-// seja, um humano já enviou algo pela UI/app do GHL (lead em atendimento).
-// Nossas mensagens via API (PIT) não têm userId, então não contam como humano.
+// True se a conversa do GHL tem uma saída RECENTE de humano (userId) — ou seja,
+// um humano está atendendo o lead AGORA. Mensagens da Tina (via API, sem userId)
+// não contam. Saídas antigas (fora da janela) também não — lead esfriou.
 async function conversationAlreadyInAttendance(ghlContactId) {
   if (!process.env.GHL_API_TOKEN) return false;
   try {
@@ -200,10 +204,14 @@ async function conversationAlreadyInAttendance(ghlContactId) {
     const msgsResp = await GHL.getMessages(conv.id, { limit: 25 });
     const msgs = msgsResp?.messages?.messages || msgsResp?.messages || msgsResp || [];
     if (!Array.isArray(msgs) || !msgs.length) return false;
+    const limiteMs = ATTENDANCE_DAYS > 0 ? Date.now() - ATTENDANCE_DAYS * 864e5 : 0;
     return msgs.some(m => {
       const dir = (m.direction || '').toLowerCase();
       const uid = m.userId || m.user_id || m.sentBy?.id;
-      return dir === 'outbound' && Boolean(uid);
+      if (dir !== 'outbound' || !uid) return false;
+      if (!limiteMs) return true; // sem janela → qualquer idade conta
+      const ts = new Date(m.dateAdded || m.createdAt || m.date || 0).getTime();
+      return ts ? ts >= limiteMs : false; // sem data confiável → não bloqueia (lado seguro p/ atender)
     });
   } catch (err) {
     logger.warn({ err: err.message, ghlContactId }, 'falha checando atendimento prévio; segue normal');
@@ -312,6 +320,12 @@ async function handleInbound(event) {
   if (SKIP_IN_ATTENDANCE && !contact.last_outbound_at) {
     if (await conversationAlreadyInAttendance(ghlContactId)) {
       logger.info({ ghlContactId, contactId: contact.id }, 'lead já estava em atendimento humano (conversa pré-existente), Tina não assume');
+      // Log auditável: pra você acompanhar quantas vezes o filtro atuou e
+      // checar se não está bloqueando lead que devia atender (resumo-dia).
+      try {
+        db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_em_atendimento', ?)`)
+          .run(contact.id, JSON.stringify({ ghlContactId }));
+      } catch {}
       handleSDRReply(contact.id, null);
       return;
     }
