@@ -192,9 +192,16 @@ const SKIP_IN_ATTENDANCE = process.env.SKIP_LEADS_IN_ATTENDANCE !== 'false';
 // é oportunidade nova pra Tina). Configurável; 0/negativo = sem janela (qualquer idade).
 const ATTENDANCE_DAYS = Number(process.env.SKIP_ATTENDANCE_DAYS || 30);
 
-// True se a conversa do GHL tem uma saída RECENTE de humano (userId) — ou seja,
-// um humano está atendendo o lead AGORA. Mensagens da Tina (via API, sem userId)
-// não contam. Saídas antigas (fora da janela) também não — lead esfriou.
+// Sources que são AUTOMAÇÃO (não atendimento humano), mesmo tendo userId — o
+// GHL carimba o dono do workflow/campanha no userId. Confirmado em prod: msg
+// de workflow vem com userId preenchido.
+const AUTO_SOURCES = new Set(['workflow', 'campaign', 'bulk_actions', 'bulk', 'automation']);
+
+// True se a conversa do GHL tem uma saída RECENTE de um HUMANO. Discriminador
+// confirmado em prod (jun/2026): humano envia com `userId` preenchido (Tina via
+// API sempre vem com userId NULL). Excluímos sources de automação (workflow/
+// campanha), que também trazem userId. Saídas antigas (fora da janela) não
+// contam — lead esfriou e a Tina pode reabordar.
 async function conversationAlreadyInAttendance(ghlContactId) {
   if (!process.env.GHL_API_TOKEN) return false;
   try {
@@ -208,10 +215,12 @@ async function conversationAlreadyInAttendance(ghlContactId) {
     return msgs.some(m => {
       const dir = (m.direction || '').toLowerCase();
       const uid = m.userId || m.user_id || m.sentBy?.id;
-      if (dir !== 'outbound' || !uid) return false;
-      if (!limiteMs) return true; // sem janela → qualquer idade conta
+      const src = String(m.source || '').toLowerCase();
+      if (dir !== 'outbound' || !uid) return false;   // só humano tem userId; Tina = null
+      if (AUTO_SOURCES.has(src)) return false;         // workflow/campanha não é humano atendendo
+      if (!limiteMs) return true;                      // sem janela → qualquer idade conta
       const ts = new Date(m.dateAdded || m.createdAt || m.date || 0).getTime();
-      return ts ? ts >= limiteMs : false; // sem data confiável → não bloqueia (lado seguro p/ atender)
+      return ts ? ts >= limiteMs : false;              // sem data confiável → não bloqueia (lado seguro p/ atender)
     });
   } catch (err) {
     logger.warn({ err: err.message, ghlContactId }, 'falha checando atendimento prévio; segue normal');
