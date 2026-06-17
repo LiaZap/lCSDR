@@ -34,49 +34,25 @@ export function upsertContactFromGHL(ghlContact) {
 }
 
 export function recordInbound(contactId, { content, content_type = 'text', ghl_message_id = null, attachment_url = null } = {}) {
-  // A versão do better-sqlite3 no container REJEITA `undefined` ("Too few
-  // parameter values") — diferente da local, que aceita. Então montamos o
-  // array de valores, coagimos TODO undefined p/ null e usamos spread (garante
-  // exatamente 5 args, elimina erro de contagem). O log abaixo revela qual
-  // campo estava undefined, pra achar a causa raiz sem ficar no escuro.
-  const vals = [
-    contactId,
-    ghl_message_id ?? null,
-    content ?? '',
-    content_type ?? 'text',
-    attachment_url ?? null,
-  ];
-  const undefIdx = vals.findIndex(v => v === undefined);
-  if (undefIdx !== -1) {
-    const campo = ['contactId', 'ghl_message_id', 'content', 'content_type', 'attachment_url'][undefIdx];
-    logger.warn({ campo, contactId, content_type }, 'recordInbound: parâmetro undefined coagido p/ null');
-    vals[undefIdx] = null;
-  }
-  const stmt = db.prepare(`
+  // O better-sqlite3 só aceita number/string/bigint/buffer/null. Se passar um
+  // OBJETO, ele acha que são "named params" e dispara "Too few parameter
+  // values". O GHL às vezes manda o `body` como objeto (áudio/anexo
+  // estruturado), então coagimos qualquer não-primitivo p/ JSON string.
+  const bind = (v, dflt = null) => {
+    if (v === undefined || v === null) return dflt;
+    if (typeof v === 'object') { try { return JSON.stringify(v); } catch { return String(v); } }
+    return v; // number, string, bigint, boolean
+  };
+  db.prepare(`
     INSERT INTO messages (contact_id, ghl_message_id, direction, author, content, content_type, raw_attachment_url)
     VALUES (?, ?, 'inbound', 'lead', ?, ?, ?)
-  `);
-  try {
-    stmt.run(...vals);
-  } catch (e) {
-    // Diagnóstico: mostra a SQL real e cada valor/tipo pra achar a causa do
-    // "Too few parameter values" (que NÃO deveria acontecer com 5 args).
-    logger.error({
-      err: e.message,
-      sql: stmt.source,
-      valsLen: vals.length,
-      tipos: vals.map(v => v === undefined ? 'undefined' : v === null ? 'null' : typeof v),
-      preview: vals.map(v => String(v ?? '').slice(0, 30)),
-    }, 'recordInbound INSERT falhou — diagnóstico');
-    // Fallback: grava o mínimo com primitivos garantidos pra NÃO derrubar o
-    // webhook (Tina continua respondendo). Não relança o erro.
-    try {
-      db.prepare(`INSERT INTO messages (contact_id, direction, author, content, content_type) VALUES (?, 'inbound', 'lead', ?, ?)`)
-        .run(contactId, String(content ?? ''), String(content_type ?? 'text'));
-    } catch (e2) {
-      logger.error({ err: e2.message }, 'recordInbound fallback também falhou');
-    }
-  }
+  `).run(
+    contactId,
+    bind(ghl_message_id),
+    bind(content, ''),
+    bind(content_type, 'text'),
+    bind(attachment_url),
+  );
   db.prepare('UPDATE contacts SET last_inbound_at = CURRENT_TIMESTAMP WHERE id = ?').run(contactId);
   // Lead respondeu → cancela follow-ups pendentes desse contato.
   // Não faz sentido mandar "dei uma sumida" pra quem acabou de falar.

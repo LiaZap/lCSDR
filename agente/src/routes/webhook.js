@@ -270,8 +270,23 @@ async function handleInbound(event) {
   // 2) Classifica tipo de mensagem (texto, áudio, imagem, PDF)
   //    GHL envia em `messageType` (WhatsApp/SMS/Email/FB/IG/GMB) e conteúdo em `body` + `attachments`.
   const msgType = (event.messageType || '').toLowerCase();
-  const body = event.body || event.message || '';
-  const attachments = event.attachments || [];
+  let rawBody = event.body ?? event.message ?? '';
+  let attachments = event.attachments || [];
+
+  // O GHL às vezes manda o conteúdo como OBJETO (áudio/anexo estruturado), não
+  // como string nem no array `attachments`. Loga a estrutura real (pra mapear)
+  // e tenta extrair a URL/mídia de dentro dele.
+  if (rawBody && typeof rawBody === 'object') {
+    logger.info({ ghlContactId, bodyObj: rawBody, keys: Object.keys(rawBody) }, 'body veio como OBJETO (provável áudio/anexo) — inspecionando');
+    const cand = rawBody.attachments || rawBody.media || rawBody.url || rawBody.audio
+      || rawBody.file || rawBody.attachmentUrl || rawBody.fileUrl || rawBody.link;
+    if (Array.isArray(cand)) attachments = attachments.concat(cand);
+    else if (cand) attachments = attachments.concat([cand]);
+    rawBody = typeof rawBody.text === 'string' ? rawBody.text
+      : typeof rawBody.body === 'string' ? rawBody.body
+      : typeof rawBody.caption === 'string' ? rawBody.caption : '';
+  }
+  const body = typeof rawBody === 'string' ? rawBody : String(rawBody || '');
 
   let content = body;
   let content_type = 'text';
