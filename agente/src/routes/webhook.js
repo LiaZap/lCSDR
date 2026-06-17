@@ -8,6 +8,7 @@ import {
   upsertContactFromGHL, recordInbound, recordOutbound, countMessagesToday,
 } from '../agent/contactService.js';
 import { generateTinaReply } from '../agent/tina.js';
+import { describeImageBuffer } from '../agent/tina-gemini.js';
 import { sendSequence, sendText } from '../agent/messenger.js';
 import {
   pauseIA, scheduleFollowup, handleSDRReply,
@@ -24,6 +25,30 @@ import { withContactLock } from '../utils/contactLock.js';
 const router = express.Router();
 const MAX_KB = Number(process.env.MAX_ATTACHMENT_KB || 200);
 const MAX_MSGS_DAY = Number(process.env.MAX_MESSAGES_PER_CONVERSATION_PER_DAY || 40);
+
+// Identifica o tipo real de um anexo pelos MAGIC BYTES (assinatura do arquivo).
+// O GHL serve mídia do WhatsApp sem extensão na URL e sem content-type, então
+// não dá pra confiar só na URL. Retorna { kind: 'image'|'audio'|'pdf'|null, mime }.
+function sniffAttachment(buf) {
+  if (!buf || buf.length < 12) return { kind: null, mime: null };
+  const b = buf;
+  const ascii = (i, s) => [...s].every((c, k) => b[i + k] === c.charCodeAt(0));
+  // imagens
+  if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return { kind: 'image', mime: 'image/jpeg' };
+  if (b[0] === 0x89 && ascii(1, 'PNG')) return { kind: 'image', mime: 'image/png' };
+  if (ascii(0, 'GIF8')) return { kind: 'image', mime: 'image/gif' };
+  if (ascii(0, 'RIFF') && ascii(8, 'WEBP')) return { kind: 'image', mime: 'image/webp' };
+  if (b[0] === 0x42 && b[1] === 0x4D) return { kind: 'image', mime: 'image/bmp' };
+  // PDF
+  if (ascii(0, '%PDF')) return { kind: 'pdf', mime: 'application/pdf' };
+  // áudio (OBS: WAV e WEBP são ambos RIFF — diferencia pelo bloco em offset 8)
+  if (ascii(0, 'OggS')) return { kind: 'audio', mime: 'audio/ogg' };
+  if (ascii(0, 'RIFF') && ascii(8, 'WAVE')) return { kind: 'audio', mime: 'audio/wav' };
+  if (ascii(0, 'ID3')) return { kind: 'audio', mime: 'audio/mpeg' };
+  if (b[0] === 0xFF && (b[1] & 0xE0) === 0xE0) return { kind: 'audio', mime: 'audio/mpeg' };
+  if (ascii(4, 'ftyp')) return { kind: 'audio', mime: 'audio/mp4' }; // m4a/aac
+  return { kind: null, mime: null };
+}
 
 // Idempotência de webhook: GHL pode reentregar o mesmo evento mais de
 // uma vez (timeout, retry). Sem dedup, a Tina processa 2x e responde 2x.
@@ -296,23 +321,37 @@ async function handleInbound(event) {
   const attachList = attachments.map(a => typeof a === 'string' ? { url: a } : a);
   // tipo declarado pelo GHL no objeto do anexo (varia: type/mimeType/contentType)
   const attType = a => String(a.type || a.mimeType || a.contentType || a.format || '').toLowerCase();
-  const audioAtt = attachList.find(a => /\.(ogg|opus|mp3|m4a|wav|amr|aac|mpeg)(\?|$)/i.test(a.url || '') || /audio|voice|ptt|ogg|opus|mpeg/.test(attType(a)));
-  const pdfAtt = attachList.find(a => /\.(pdf|doc|docx)(\?|$)/i.test(a.url || '') || /pdf|msword|document/.test(attType(a)));
-  const imageAtt = attachList.find(a => /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(a.url || '') || /image/.test(attType(a)));
+  const byExt = re => attachList.find(a => re.test(a.url || ''));
+  const byType = re => attachList.find(a => re.test(attType(a)));
 
-  // Fallback de áudio: o WhatsApp manda a nota de voz como anexo SEM extensão na
-  // URL e o GHL não marca o tipo de conteúdo em `messageType` (lá vem o canal,
-  // ex.: "WhatsApp"). Então: anexo presente, sem texto e que não é imagem/PDF →
-  // trata como áudio. O Whisper identifica o formato pelo conteúdo do arquivo.
-  const looksLikeAudio = audioAtt
-    || /audio|voice|ptt/.test(msgType)
-    || (attachList.length > 0 && !imageAtt && !pdfAtt && !body.trim());
+  // 1ª passada: classifica por extensão/type declarado pelo GHL
+  let pdfAtt = byExt(/\.(pdf|docx?|odt)(\?|$)/i) || byType(/pdf|msword|officedocument|document/);
+  let imageAtt = byExt(/\.(jpe?g|png|gif|webp|bmp)(\?|$)/i) || byType(/image/);
+  let audioAtt = byExt(/\.(ogg|opus|mp3|m4a|wav|amr|aac|mpeg)(\?|$)/i) || byType(/audio|voice|ptt/);
+
+  let kind = pdfAtt ? 'pdf' : imageAtt ? 'image' : audioAtt ? 'audio' : null;
+  const primaryUrl = (pdfAtt || imageAtt || audioAtt || attachList[0])?.url || null;
+
+  // 2ª passada: o GHL frequentemente serve a mídia SEM extensão e SEM type
+  // (ex.: nota de voz e imagem do WhatsApp). Aí baixa e identifica pelos
+  // MAGIC BYTES (assinatura do arquivo). Acaba com a confusão imagem↔áudio.
+  let attBuf = null, attMime = null;
+  if (attachList.length && !kind && primaryUrl) {
+    try {
+      attBuf = await downloadAttachment(primaryUrl);
+      const s = sniffAttachment(attBuf);
+      kind = s.kind; attMime = s.mime;
+      logger.info({ ghlContactId, kind, mime: attMime, len: attBuf?.length }, 'anexo ambíguo — tipo por magic bytes');
+    } catch (err) {
+      logger.error({ err: err.message, ghlContactId }, 'falha ao baixar anexo pra sniff');
+    }
+  }
 
   // PDF → bloquear (não analisar via IA, delegar à leitura crítica)
-  if (pdfAtt) {
-    attachment_url = pdfAtt.url;
+  if (kind === 'pdf') {
+    attachment_url = primaryUrl;
     recordInbound(contact.id, {
-      content: `[lead enviou arquivo: ${pdfAtt.url}]`,
+      content: `[lead enviou arquivo: ${primaryUrl}]`,
       content_type: 'pdf_blocked',
       ghl_message_id: event.messageId || event.id,
       attachment_url,
@@ -323,27 +362,35 @@ async function handleInbound(event) {
     return;
   }
 
-  // Áudio → baixa (com auth GHL) e transcreve
-  if (looksLikeAudio) {
-    const url = audioAtt?.url || attachList[0]?.url;
-    attachment_url = url || null;
-    logger.info({ ghlContactId, url, msgType, attCount: attachList.length }, 'mensagem detectada como ÁUDIO, transcrevendo');
+  // Áudio → baixa (com auth GHL) e transcreve (Whisper)
+  if (kind === 'audio') {
+    attachment_url = primaryUrl;
+    logger.info({ ghlContactId, attCount: attachList.length }, 'mensagem detectada como ÁUDIO, transcrevendo');
     try {
-      const buf = url ? await downloadAttachment(url) : null;
+      const buf = attBuf || (primaryUrl ? await downloadAttachment(primaryUrl) : null);
       const transcript = buf ? await transcribeAudioBuffer(buf) : null;
       content = transcript ? `[áudio transcrito] ${transcript}` : '[áudio recebido — falha na transcrição]';
-      content_type = 'audio_transcript';
     } catch (err) {
       logger.error({ err: err.message }, 'falha baixando/transcrevendo áudio');
       content = '[áudio recebido — não consegui ouvir]';
-      content_type = 'audio_transcript';
     }
+    content_type = 'audio_transcript';
   }
 
-  // Imagem → registra mas não tenta ler (fora do escopo da Iara por enquanto)
-  if (imageAtt && !audioAtt) {
-    attachment_url = imageAtt.url;
-    content = body || '[lead enviou uma imagem]';
+  // Imagem → descreve com a visão do Gemini (a Tina "lê" capa de livro, print, etc.)
+  if (kind === 'image') {
+    attachment_url = primaryUrl;
+    logger.info({ ghlContactId, attCount: attachList.length }, 'mensagem detectada como IMAGEM, descrevendo (visão)');
+    try {
+      const buf = attBuf || (primaryUrl ? await downloadAttachment(primaryUrl) : null);
+      const mime = attMime || (buf ? sniffAttachment(buf).mime : null) || 'image/jpeg';
+      const desc = buf ? await describeImageBuffer(buf, mime) : null;
+      const legenda = body.trim() ? ` Legenda do lead: "${body.trim()}"` : '';
+      content = desc ? `[imagem] ${desc}${legenda}` : (body || '[lead enviou uma imagem]');
+    } catch (err) {
+      logger.error({ err: err.message }, 'falha ao descrever imagem');
+      content = body || '[lead enviou uma imagem]';
+    }
     content_type = 'image';
   }
 

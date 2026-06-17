@@ -138,7 +138,7 @@ function buildHistory(contactId, limit = 30) {
   for (const m of rows) {
     const role = m.direction === 'inbound' ? 'user' : 'model';
     let text = m.content || '';
-    if (m.content_type === 'audio_transcript') text = `[áudio transcrito] ${text}`;
+    if (m.content_type === 'audio_transcript' && !text.startsWith('[áudio')) text = `[áudio transcrito] ${text}`;
     if (m.content_type === 'pdf_blocked') text = `[o lead mandou um PDF — você respondeu que análise é etapa de leitura crítica]`;
     if (m.author === 'sdr') text = `[SDR humano respondeu] ${text}`;
     turns.push({ role, parts: [{ text }] });
@@ -187,6 +187,39 @@ async function generateWithRetry(req, retries = 2) {
     }
   }
   throw lastErr;
+}
+
+// Descreve uma imagem que o lead enviou, usando a visão multimodal do Gemini.
+// Roda no webhook (igual ao Whisper pro áudio): vira texto e entra no
+// histórico como contexto. Retorna 1-2 frases ou null se não der.
+export async function describeImageBuffer(buffer, mime = 'image/jpeg') {
+  if (!process.env.GEMINI_API_KEY) {
+    logger.warn('GEMINI_API_KEY ausente — descrição de imagem pulada');
+    return null;
+  }
+  if (!buffer || !buffer.length) return null;
+  try {
+    const resp = await generateWithRetry({
+      model: MODEL,
+      contents: [{
+        role: 'user',
+        parts: [
+          { inlineData: { mimeType: mime, data: buffer.toString('base64') } },
+          { text: 'Você é assistente de uma agência literária. Em 1-2 frases objetivas e em português, descreva o que o lead enviou nesta imagem. Se for capa/foto de um livro, diga o título (se legível) e o tema. Se for print de conversa, documento ou tela, resuma o essencial. Responda só a descrição, sem preâmbulo.' },
+        ],
+      }],
+      config: {
+        temperature: 0.2,
+        maxOutputTokens: 300,
+        thinkingConfig: { thinkingLevel: 'low' },
+        abortSignal: AbortSignal.timeout(25_000),
+      },
+    });
+    return (resp.text || '').trim() || null;
+  } catch (err) {
+    logger.error({ err: err.message }, 'falha ao descrever imagem (Gemini vision)');
+    return null;
+  }
 }
 
 export async function generateTinaReplyGemini({ contact, incomingText, extraContext = null }) {
