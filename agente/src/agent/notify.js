@@ -7,7 +7,25 @@
 import { db } from '../db/index.js';
 import { GHL } from '../ghl/client.js';
 import { UAZAPI } from '../uazapi/client.js';
+import { calendarName } from './scheduling.js';
 import { logger } from '../utils/logger.js';
+
+// Funil em rótulo amigável pro time.
+function funnelLabel(f) {
+  return {
+    escrever: 'Escrita / desenvolvimento do livro',
+    publicar: 'Publicação',
+    divulgar: 'Divulgação / Assessoria de Imprensa',
+  }[f] || (f || '—');
+}
+
+// Resumo rápido pro consultor se situar antes de assumir a conversa.
+function resumoLead(contact, funnel) {
+  const linhas = [`🎯 Interesse: ${funnelLabel(funnel || contact.funnel)}`];
+  const notas = (contact.qualification_notes || '').trim();
+  if (notas) linhas.push(`📋 Contexto: ${notas}`);
+  return linhas.join('\n');
+}
 
 // Grupo interno do time no WhatsApp (JID uazapi, ex.: "1203...@g.us"). O
 // WhatsApp oficial (Meta) é 1:1 e NÃO posta em grupo; o número uazapi participa
@@ -46,11 +64,12 @@ export async function notifyLiveHandoff(contact, { consultant, funnel }) {
 
   const nome = contact.name || 'Lead';
   const tel = contact.phone || '';
-  const quem = consultant?.name ? `→ ${consultant.name}` : '(próximo da fila)';
-  const msg = `🔥 Lead quer falar AGORA ${quem}\n`
-    + `Lead: ${nome}${tel ? ` (${tel})` : ''}\n`
-    + `Funil: ${funnel || '-'}\n`
-    + `Assumir a conversa no WhatsApp o quanto antes.`;
+  const quem = consultant?.name || '(próximo da fila)';
+  const msg = `🔥 *Lead quer falar AGORA*\n`
+    + `👤 Lead: ${nome}${tel ? ` (${tel})` : ''}\n`
+    + `👨‍💼 Consultor: ${quem}\n`
+    + `${resumoLead(contact, funnel)}\n`
+    + `\n⚡ Assumir a conversa no WhatsApp o quanto antes.`;
 
   await notifyGroupUazapi(msg);
   await notifyContactGHL(msg);
@@ -67,10 +86,12 @@ export async function notifyAgendamento(contact, { label, iso, funnel, calendarI
 
   const nome = contact.name || 'Lead';
   const tel = contact.phone || '';
-  const msg = `🗓️ Nova reunião agendada pela Tina\n`
-    + `Lead: ${nome}${tel ? ` (${tel})` : ''}\n`
-    + `Funil: ${funnel || '-'}\n`
-    + `Horário: ${label}`;
+  const consultor = calendarName(calendarId);
+  const msg = `🗓️ *Nova reunião agendada pela Tina*\n`
+    + `👤 Lead: ${nome}${tel ? ` (${tel})` : ''}\n`
+    + (consultor ? `👨‍💼 Consultor: ${consultor}\n` : '')
+    + `🕐 Quando: ${label}\n`
+    + `${resumoLead(contact, funnel)}`;
 
   await notifyGroupUazapi(msg);
   await notifyContactGHL(msg);

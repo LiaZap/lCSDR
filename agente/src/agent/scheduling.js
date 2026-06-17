@@ -38,6 +38,22 @@ export function schedulingEnabled() {
   return process.env.SCHEDULING_ENABLED === 'true' && getCalendarIds().length > 0;
 }
 
+// Nome do consultor dono do calendário (pra avisos do time). Prioriza o env
+// GHL_CALENDAR_NAMES ("calId:Nome,calId:Nome"); cai no mapa conhecido dos 6.
+const CALENDAR_NAMES = {
+  xzm7QW8TUGbwOP6IxAK8: 'Andressa', fMuUzjj4nSKRUXEPZYAx: 'Victor',
+  OGYp8xuhvT1Fk5alNApk: 'Nataly', mbhOf9ovPL5HcCnCu5EN: 'Fernanda',
+  '3XfNAPi9421TD3HlN7ac': 'Bruna', NhjBRFw1AJex8TqNuLAw: 'Gabriel',
+};
+export function calendarName(calendarId) {
+  if (!calendarId) return null;
+  for (const pair of (process.env.GHL_CALENDAR_NAMES || '').split(',')) {
+    const [id, ...rest] = pair.split(':');
+    if (id?.trim() === calendarId && rest.length) return rest.join(':').trim();
+  }
+  return CALENDAR_NAMES[calendarId] || null;
+}
+
 // Achata a resposta de free-slots do GHL num array de ISO datetimes.
 // GHL devolve { "2026-06-15": { slots: [ "...T14:00:00-03:00", ... ] }, traceId }
 function flattenSlots(raw) {
