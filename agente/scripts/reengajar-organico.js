@@ -27,8 +27,19 @@ const AUTO = new Set(['workflow', 'campaign', 'bulk_actions', 'bulk', 'automatio
 const B = 'https://services.leadconnectorhq.com';
 const H = { Authorization: 'Bearer ' + process.env.GHL_API_TOKEN, Version: (process.env.GHL_API_VERSION || '2021-07-28'), Accept: 'application/json' };
 
-function opener(name) {
-  const p = (name || '').trim().split(/\s+/)[0];
+// Primeiro nome "limpo": rejeita vazio, número/telefone, símbolo, 1 letra;
+// capitaliza (JESSILDE/jessilde -> Jessilde). null = sem nome usável.
+const NOMES_GENERICOS = new Set(['lead', 'cliente', 'contato', 'whatsapp', 'wpp', 'instagram', 'lc', 'teste', 'test', 'novo', 'aluno', 'autor']);
+function firstName(raw) {
+  const first = String(raw || '').trim().split(/\s+/)[0] || '';
+  if (first.length < 2) return null;
+  if (/\d/.test(first)) return null;        // tem dígito (telefone/lixo)
+  if (/^[\W_]+$/.test(first)) return null;   // só símbolos
+  if (NOMES_GENERICOS.has(first.toLowerCase())) return null; // placeholder ("Lead", etc.)
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+}
+function opener(raw) {
+  const p = firstName(raw);
   return `Oi${p ? ', ' + p : ''}! Aqui é a Tina, do Grupo LC 😊\n\nVi que em algum momento você teve interesse em dar vida ao seu livro com a gente. Como está esse seu projeto hoje? Quero entender em que fase você está pra te indicar o melhor próximo passo.`;
 }
 
@@ -80,7 +91,7 @@ let elegiveis = 0, enviados = 0, fora24h = 0, humano = 0, semFone = 0;
 for (const o of ops) {
   const c = o.contact || {};
   const cid = o.contactId || c.id;
-  const name = c.name || o.name || '';
+  const name = c.name || c.contactName || [c.firstName, c.lastName].filter(Boolean).join(' ') || o.contactName || o.name || '';
   const phone = c.phone || '';
   if (!cid || !phone) { semFone++; continue; }
 
@@ -89,13 +100,14 @@ for (const o of ops) {
   if (info.humanLast) { humano++; continue; }                          // humano atendendo
 
   elegiveis++;
-  console.log(`${SEND ? '✅ ENVIAR' : '• (dry)'} ${name.padEnd(22)} | ${phone}`);
+  const fn = firstName(name);
+  console.log(`${SEND ? '✅ ENVIAR' : '• (dry)'} ${(name || '(sem nome)').slice(0, 22).padEnd(22)} | saudação: "Oi${fn ? ', ' + fn : ''}!" | ${phone}`);
 
   if (SEND) {
     try {
       const ghlC = await GHL.getContact(cid);
       const local = upsertContactFromGHL(ghlC);
-      const txt = opener(name);
+      const txt = opener(local.name || name);   // nome autoritativo do contato no GHL
       await sendText(local, txt);
       recordOutbound(local.id, { author: 'ia', content: txt });
       if (REQUIRED_TAG && REQUIRED_TAG !== 'false') { try { await GHL.addTag(cid, REQUIRED_TAG); } catch {} }
