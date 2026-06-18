@@ -171,7 +171,9 @@ REGRAS DE AGENDAMENTO:
 - Ofereça proativamente os **2-3 mais cedo** desta lista (priorize o quanto antes, o lead não pode esfriar).
 - Se o lead pedir um DIA ou PERÍODO específico ("amanhã de manhã", "fim da tarde", "quinta"), escolha da lista o horário que MELHOR casa com o pedido e ofereça. NÃO invente horário fora da lista.
 - Se NENHUM horário da lista casa com o que o lead quer, seja honesta: ofereça o mais próximo que tem ("o mais perto disso que consigo é X") e, se ainda assim não servir, diga que o especialista confirma um horário sob medida.
-- Quando o lead confirmar um, devolva "book_slot" com o ISO EXATO daquele horário (copie da lista), e confirme na mensagem.
+- ⚠️ SÓ devolva "book_slot" quando o lead confirmar **DIA E HORA específicos** (ex: "pode ser amanhã às 11h30", ou um "sim" claro a um horário que VOCÊ ofereceu com dia+hora). Use o ISO EXATO daquele horário (copie da lista).
+- ⚠️ Se o lead deu só a HORA ("11:30 dá certo") mas NÃO o dia — ou só o dia sem a hora — **NÃO marque ainda**: confirme o que falta ("11h30 de qual dia fica melhor pra você, hoje ou amanhã?") e só devolva book_slot depois que ele responder com dia+hora.
+- ⚠️ NUNCA trate como confirmação mensagens ambíguas tipo "ok", "recebido", "confirmado o recebimento", "blz", "deixa eu ver", "vou verificar". Isso NÃO é "pode marcar". Pergunte de forma direta: "Posso confirmar então [dia] às [hora]?" e só marque com o "sim" explícito.
 - NUNCA invente um horário que não está nesta lista.`.trim();
 }
 
