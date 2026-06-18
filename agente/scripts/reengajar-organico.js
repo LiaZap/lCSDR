@@ -29,13 +29,14 @@ const H = { Authorization: 'Bearer ' + process.env.GHL_API_TOKEN, Version: (proc
 
 // Primeiro nome "limpo": rejeita vazio, número/telefone, símbolo, 1 letra;
 // capitaliza (JESSILDE/jessilde -> Jessilde). null = sem nome usável.
-const NOMES_GENERICOS = new Set(['lead', 'cliente', 'contato', 'whatsapp', 'wpp', 'instagram', 'lc', 'teste', 'test', 'novo', 'aluno', 'autor']);
+const NOMES_GENERICOS = new Set(['lead', 'cliente', 'contato', 'whatsapp', 'wpp', 'instagram', 'lc', 'teste', 'test', 'novo', 'aluno', 'autor', 'off-line', 'offline', 'online', 'dr', 'dra']);
 function firstName(raw) {
-  const first = String(raw || '').trim().split(/\s+/)[0] || '';
+  let first = String(raw || '').trim().split(/\s+/)[0] || '';
+  // tira emoji/símbolo das BORDAS (ex.: "🌸Mara" -> "Mara", "⛔Off-line" -> "Off-line")
+  first = first.replace(/^[^\p{L}]+/u, '').replace(/[^\p{L}]+$/u, '');
   if (first.length < 2) return null;
   if (/\d/.test(first)) return null;        // tem dígito (telefone/lixo)
-  if (/^[\W_]+$/.test(first)) return null;   // só símbolos
-  if (NOMES_GENERICOS.has(first.toLowerCase())) return null; // placeholder ("Lead", etc.)
+  if (NOMES_GENERICOS.has(first.toLowerCase())) return null; // placeholder/título/status
   return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
 }
 function opener(raw) {
