@@ -206,6 +206,29 @@ function calendarForSlot(contactId, iso) {
   }
 }
 
+// Retorna a próxima reunião FUTURA e ativa do contato (anti double-booking), ou
+// null. Se um consultor (ou a própria Tina) já marcou, não cria outra.
+// Falha ABERTO (erro/API fora → null → segue e agenda) pra não travar o lead.
+export async function upcomingAppointment(contact) {
+  if (!contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return null;
+  try {
+    const r = await GHL.getContactAppointments(contact.ghl_contact_id);
+    const events = r?.events || r?.appointments || (Array.isArray(r) ? r : []);
+    if (!Array.isArray(events) || !events.length) return null;
+    const now = Date.now();
+    const ativos = events.filter(e => {
+      const st = new Date(e.startTime || e.startedAt || 0).getTime();
+      const status = String(e.appointmentStatus || e.status || '').toLowerCase();
+      const morta = /cancel|invalid|noshow|no-show|deleted/.test(status);
+      return st > now && !morta;
+    }).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+    return ativos[0] || null;
+  } catch (err) {
+    logger.warn({ err: err.message, contactId: contact.id }, 'falha checando reunião existente; segue (fail-open)');
+    return null;
+  }
+}
+
 // Marca o agendamento no GHL, no calendário do closer dono do horário.
 // Retorna { ok, label, error }.
 export async function bookSlot(contact, iso, { title, notes, assignedUserId } = {}) {

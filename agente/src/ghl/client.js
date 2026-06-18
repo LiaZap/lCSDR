@@ -170,6 +170,10 @@ export const GHL = {
   async deleteAppointment(eventId) {
     return ghl('DELETE', `/calendars/events/${eventId}`);
   },
+  // Reuniões do contato (pra evitar double-booking). Retorna { events: [...] }.
+  async getContactAppointments(contactId) {
+    return ghl('GET', `/contacts/${contactId}/appointments`);
+  },
   async deleteContact(contactId) {
     return ghl('DELETE', `/contacts/${contactId}`);
   },

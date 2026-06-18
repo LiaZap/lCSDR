@@ -16,6 +16,7 @@ import {
 } from '../agent/handoff.js';
 import {
   schedulingEnabled, getNextSlots, slotsContextBlock, bookSlot, recordOffer,
+  upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
 import { liveHandoff } from '../agent/queue.js';
@@ -510,23 +511,39 @@ async function handleInbound(event) {
     // 7) AGENDAMENTO, fase 3: o lead confirmou um horário → marca no GHL.
     let booked = null;
     if (schedulingEnabled() && result.book_slot) {
-      booked = await bookSlot(fresh, result.book_slot);
-      if (!booked.ok) {
-        logger.error({ contactId: fresh.id, err: booked.error }, 'book_slot falhou, mantém agendando');
+      // ANTI DOUBLE-BOOKING: se o lead JÁ tem reunião futura (um consultor
+      // marcou manualmente, ou a própria Tina já marcou antes), NÃO cria outra.
+      const existing = await upcomingAppointment(fresh);
+      if (existing) {
+        logger.warn({ contactId: fresh.id, existingStart: existing.startTime, existingId: existing.id }, 'lead já tem reunião futura — evitando double-booking');
+        booked = { ok: false, alreadyBooked: true, existing };
+      } else {
+        booked = await bookSlot(fresh, result.book_slot);
+        if (!booked.ok) {
+          logger.error({ contactId: fresh.id, err: booked.error }, 'book_slot falhou, mantém agendando');
+        }
       }
     }
 
     // 7.5) BÔNUS: lead deu o título do livro → busca o link e anexa a
     // confirmação (a Tina nunca inventa link, quem busca é o sistema).
-    const items = result.split && result.split.length ? result.split : [result.reply];
-    if (bookSearchEnabled() && result.search_book) {
-      const found = await searchBookLink(result.search_book);
-      if (found && found.link) {
-        items.push(`Consultei aqui pelo título e encontrei esse: ${found.link} 😊 Confere se é esse mesmo o seu livro?`);
-        db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'book_found', ?)`)
-          .run(fresh.id, JSON.stringify({ query: result.search_book, link: found.link }));
-      } else {
-        items.push('Não consegui localizar pelo título aqui. Você pode me mandar o link de vendas do seu livro?');
+    let items;
+    if (booked && booked.alreadyBooked) {
+      // Evitamos double-booking: a resposta do LLM provavelmente "confirmou" o
+      // agendamento — substitui por um aviso de que o lead já tem horário.
+      const primeiro = (fresh.name || '').trim().split(/\s+/)[0];
+      items = [`Perfeito${primeiro ? ', ' + primeiro : ''}! Vi aqui que você já tem um horário reservado com a nossa equipe ✅ Em breve o especialista confirma os detalhes com você. Qualquer coisa até lá, é só me chamar!`];
+    } else {
+      items = result.split && result.split.length ? result.split : [result.reply];
+      if (bookSearchEnabled() && result.search_book) {
+        const found = await searchBookLink(result.search_book);
+        if (found && found.link) {
+          items.push(`Consultei aqui pelo título e encontrei esse: ${found.link} 😊 Confere se é esse mesmo o seu livro?`);
+          db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'book_found', ?)`)
+            .run(fresh.id, JSON.stringify({ query: result.search_book, link: found.link }));
+        } else {
+          items.push('Não consegui localizar pelo título aqui. Você pode me mandar o link de vendas do seu livro?');
+        }
       }
     }
 
@@ -562,7 +579,19 @@ async function handleInbound(event) {
     // 11) Roteamento final
     const SCHED = schedulingEnabled();
 
-    if (booked && booked.ok) {
+    if (booked && booked.alreadyBooked) {
+      // Lead JÁ tinha reunião futura (consultor marcou, ou a Tina já marcou).
+      // Não duplica: pausa, marca como agendado, registra. NÃO notifica de novo.
+      db.prepare(`
+        UPDATE contacts SET ai_paused = 1, ai_paused_at = CURRENT_TIMESTAMP,
+          stage = 'agendado', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(fresh.id);
+      db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(fresh.id);
+      db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'double_booking_evitado', ?)`)
+        .run(fresh.id, JSON.stringify({ existingStart: booked.existing?.startTime || null, existingId: booked.existing?.id || null }));
+
+    } else if (booked && booked.ok) {
       // Reunião marcada: pausa IA, notifica o time, encerra a parte da Tina.
       db.prepare(`
         UPDATE contacts SET ai_paused = 1, ai_paused_at = CURRENT_TIMESTAMP,
