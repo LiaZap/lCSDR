@@ -9,7 +9,16 @@ import { GHL } from '../ghl/client.js';
 import { logger } from '../utils/logger.js';
 
 export function preferredChannel() {
-  return process.env.UAZAPI_TOKEN ? 'uazapi' : 'ghl';
+  // Canal de ATENDIMENTO do lead. Default = GHL/Meta oficial.
+  // ATENÇÃO: ter UAZAPI_TOKEN setado é SÓ pros avisos no grupo (notify.js usa o
+  // uazapi direto) — NÃO deve trocar o canal do lead. Antes, a mera presença do
+  // token jogava TODA resposta da Tina pro número uazapi (lead recebia de outro
+  // número, e a conversa sumia do GHL). Agora só usa uazapi pro lead se for
+  // explicitamente pedido (LEAD_CHANNEL=uazapi) ou se o inbound do uazapi estiver
+  // ligado (UAZAPI_INBOUND_ENABLED=true) — aí entra e sai pelo mesmo número.
+  const explicit = (process.env.LEAD_CHANNEL || '').toLowerCase();
+  if (explicit === 'uazapi' || explicit === 'ghl') return explicit;
+  return process.env.UAZAPI_INBOUND_ENABLED === 'true' ? 'uazapi' : 'ghl';
 }
 
 /**
