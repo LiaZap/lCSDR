@@ -86,6 +86,35 @@ export async function createOrMoveOpportunityQualified(contact, { funnel, score,
   }
 }
 
+// Stages "do time" (ex: Reentrada): se o lead tem oportunidade ABERTA numa
+// delas, o time já está re-trabalhando ele → a Tina NÃO deve assumir. Default:
+// "Reentrada" do Pré-Vendas LCA. Adicione outras stages via GHL_BLOCK_OPP_STAGES
+// (CSV de stageIds). A Tina move pra "Aguardando Atendimento", nunca pra essas,
+// então não há conflito com o que ela mesma cria.
+function blockedOppStages() {
+  const raw = process.env.GHL_BLOCK_OPP_STAGES
+    || 'b661d5f1-69cd-4531-8be9-79b3e11c862f'; // Reentrada (Pré-Vendas LCA SDR)
+  return raw.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+// Retorna a oportunidade aberta do lead que está numa stage bloqueada (time
+// re-trabalhando), ou null. Falha ABERTO (erro → null → Tina segue normal).
+export async function contactInBlockedOppStage(contact) {
+  const stages = blockedOppStages();
+  if (!stages.length || !contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return null;
+  try {
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
+    const ops = r?.opportunities || (Array.isArray(r) ? r : []);
+    return ops.find(o =>
+      stages.includes(o.pipelineStageId)
+      && String(o.status || 'open').toLowerCase() === 'open'
+    ) || null;
+  } catch (err) {
+    logger.warn({ err: err.message, contactId: contact.id }, 'falha checando stage de oportunidade (reentrada); segue');
+    return null;
+  }
+}
+
 // Estimativa grosseira de ticket pro campo monetaryValue.
 // Base: tabela de preços mencionada pela Lilian na reunião.
 function estimateTicket(funnel, score = 0) {

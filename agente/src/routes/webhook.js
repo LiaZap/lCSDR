@@ -19,6 +19,7 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
+import { contactInBlockedOppStage } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
@@ -335,6 +336,23 @@ async function handleInbound(event) {
       try {
         db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_em_atendimento', ?)`)
           .run(contact.id, JSON.stringify({ ghlContactId }));
+      } catch {}
+      handleSDRReply(contact.id, null);
+      return;
+    }
+  }
+
+  // 1.56) FILTRO REENTRADA: se o lead tem oportunidade aberta numa stage que o
+  // TIME trabalha (ex: "Reentrada"), a Tina NÃO assume — é re-trabalho do time.
+  // Roda em TODA mensagem (não só 1º contato) p/ pegar re-engajamento. Pula
+  // leads já pausados (economia de chamada). Falha aberto. Configurável via env.
+  if (SKIP_IN_ATTENDANCE && !contact.ai_paused) {
+    const oppHit = await contactInBlockedOppStage(contact);
+    if (oppHit) {
+      logger.info({ ghlContactId, contactId: contact.id, stage: oppHit.pipelineStageId }, 'lead em stage de reentrada/time, Tina não assume');
+      try {
+        db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_reentrada', ?)`)
+          .run(contact.id, JSON.stringify({ stage: oppHit.pipelineStageId }));
       } catch {}
       handleSDRReply(contact.id, null);
       return;
