@@ -92,8 +92,11 @@ export async function createOrMoveOpportunityQualified(contact, { funnel, score,
 // (CSV de stageIds). A Tina move pra "Aguardando Atendimento", nunca pra essas,
 // então não há conflito com o que ela mesma cria.
 function blockedOppStages() {
-  const raw = process.env.GHL_BLOCK_OPP_STAGES
-    || 'b661d5f1-69cd-4531-8be9-79b3e11c862f'; // Reentrada (Pré-Vendas LCA SDR)
+  const raw = process.env.GHL_BLOCK_OPP_STAGES || [
+    'b661d5f1-69cd-4531-8be9-79b3e11c862f', // Reentrada — Pré-Vendas LCA (SDR)
+    '009b6a60-2c9b-41f9-95d3-20d54c18ab8d', // Reentrada — LC Editorial
+    'ee211407-4153-4a93-bf03-0b9ff000effe', // Reentrada — Pré-Vendas 2.0 (SDR1)
+  ].join(',');
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 }
 
