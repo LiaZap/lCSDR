@@ -13,6 +13,7 @@ import internalRoutes from './routes/internal.js';
 import { startScheduler } from './scheduler.js';
 import { captureRawBody } from './ghl/webhookSig.js';
 import { refreshCustomFieldsCache } from './ghl/customFields.js';
+import { preferredChannel } from './agent/messenger.js';
 
 // Importar db só pra rodar schema antes de servir
 import { db } from './db/index.js';
@@ -107,8 +108,14 @@ app.use((err, req, res, _next) => {
 
 const PORT = Number(process.env.PORT || 3333);
 app.listen(PORT, async () => {
-  const channel = process.env.UAZAPI_TOKEN ? 'uazapi' : 'ghl';
-  logger.info({ port: PORT, channel }, `🤖 Tina online — LC SDR agent`);
+  const channel = preferredChannel(); // canal REAL de atendimento do lead
+  logger.info({
+    port: PORT,
+    leadChannel: channel,
+    uazapiInbound: process.env.UAZAPI_INBOUND_ENABLED === 'true',
+    skipInAttendance: process.env.SKIP_LEADS_IN_ATTENDANCE !== 'false',
+    groupNotify: Boolean(process.env.UAZAPI_NOTIFY_GROUP),
+  }, `🤖 Tina online — canal do lead: ${channel.toUpperCase()}`);
   // Pré-carrega cache de custom fields do GHL (não-bloqueante)
   refreshCustomFieldsCache().catch(() => {});
   startScheduler();
