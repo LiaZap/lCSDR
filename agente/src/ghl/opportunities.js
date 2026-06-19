@@ -28,6 +28,14 @@ function resolvePipeline() {
   return PIPELINE_CACHE;
 }
 
+// Escolhe a oportunidade RELEVANTE do contato (em vez de `ops[0]` cego, que é
+// não-determinístico quando o contato tem várias). Prioriza a ABERTA no pipeline
+// da Tina; senão a 1ª aberta; null se não há aberta.
+function pickOpenOpp(ops, pipelineId) {
+  const open = (Array.isArray(ops) ? ops : []).filter(o => String(o.status || 'open').toLowerCase() === 'open');
+  return open.find(o => o.pipelineId === pipelineId) || open[0] || null;
+}
+
 // Cria oportunidade no pipeline "Qualificado" quando a Iara qualifica.
 // Se já existe oportunidade pro contato, só move pra stage qualificada.
 export async function createOrMoveOpportunityQualified(contact, { funnel, score, notes }) {
@@ -39,14 +47,14 @@ export async function createOrMoveOpportunityQualified(contact, { funnel, score,
     // FALHAR (rede/5xx/401), o erro sobe pro catch externo e retorna null SEM
     // criar — senão duplicaria a oportunidade (falha de API ≠ "não tem opp").
     const existing = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
-    const opp = existing?.opportunities?.[0] || existing?.[0];
+    const ops = existing?.opportunities || (Array.isArray(existing) ? existing : []);
+    const opp = pickOpenOpp(ops, pipelineId); // a aberta do pipeline da Tina (não ops[0] cego)
 
     if (opp) {
       const cur = opp.pipelineStageId;
-      const status = String(opp.status || 'open').toLowerCase();
-      // Não reabre negócio fechado (won/lost) nem rouba lead que o time está
-      // re-trabalhando (stage bloqueada). Só move o que está livre pra handoff.
-      if (status === 'won' || status === 'lost' || blockedOppStages().includes(cur)) return opp.id;
+      // pickOpenOpp já exclui won/lost (só abertas). Não rouba lead que o time
+      // está re-trabalhando (stage bloqueada/reentrada).
+      if (blockedOppStages().includes(cur)) return opp.id;
       // Manda `pipelineId` junto: sem ele, o GHL valida o stage contra o
       // pipeline ATUAL da oportunidade — se ela estiver em outro pipeline (ex.:
       // já foi movida pros Closers), o stage não bate e dá 400. Com o
@@ -125,12 +133,10 @@ export async function claimToIaTina(contact) {
   try {
     const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
     const ops = r?.opportunities || (Array.isArray(r) ? r : []);
-    const opp = ops[0];
+    const opp = pickOpenOpp(ops, pipelineId); // a aberta do pipeline da Tina (não ops[0] cego)
     if (opp) {
-      const status = String(opp.status || 'open').toLowerCase();
-      // Não mexe: fechado, já na IA Tina, ou já em Aguardando Atendimento
-      // (qualificado/handoff — não puxa de volta pra IA Tina).
-      if (status === 'won' || status === 'lost' || opp.pipelineStageId === stageIaTina || opp.pipelineStageId === stageQualified) return opp.id;
+      // Já na IA Tina ou já em Aguardando Atendimento → não mexe.
+      if (opp.pipelineStageId === stageIaTina || opp.pipelineStageId === stageQualified) return opp.id;
       // Só reorganiza DENTRO do pipeline da Tina (Pré-Vendas LCA). Não puxa opp
       // de OUTRO pipeline (Closers/Editorial) pra não bagunçar o board deles.
       if (opp.pipelineId && opp.pipelineId !== pipelineId) return opp.id;
