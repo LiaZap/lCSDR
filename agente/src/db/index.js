@@ -45,6 +45,16 @@ export function runSchema() {
   // Etiqueta de temperatura atual do lead no GHL (quente/morno/frio).
   // Guardada localmente pra só chamar a API do GHL quando a faixa MUDA.
   safeAddColumn('contacts', 'ghl_temp_tag', 'TEXT');
+
+  // Continuidade via coluna "IA Tina" (o time arrasta o card pra Tina assumir):
+  //  - ia_tina_self_moved_at: marca quando a PRÓPRIA Tina moveu a opp pra IA Tina
+  //    (anti-loop: o handler do webhook de stage IGNORA o eco da própria
+  //    movimentação dentro de um TTL).
+  //  - ia_tina_continuation_at: quando a Tina já mandou a mensagem de retomada
+  //    (cooldown anti-spam / idempotência contra retries e re-arrasto do card).
+  safeAddColumn('contacts', 'ia_tina_self_moved_at', 'DATETIME');
+  safeAddColumn('contacts', 'ia_tina_self_moved_opp', 'TEXT');   // opp id da própria movimentação (anti-loop por id, não só por tempo)
+  safeAddColumn('contacts', 'ia_tina_continuation_at', 'DATETIME');
 }
 
 // Garante schema na primeira importação

@@ -75,6 +75,28 @@ export async function notifyLiveHandoff(contact, { consultant, funnel }) {
   await notifyContactGHL(msg);
 }
 
+// Aviso quando o time encaminhou um lead pra Tina (arrastou o card pra coluna
+// IA Tina) MAS a janela de 24h do WhatsApp está FECHADA — a Tina não pode
+// iniciar conversa fria (regra da Meta), então o time precisa dar o 1º toque.
+// Quando o lead responder, a Tina assume sozinha. Não-bloqueante.
+export async function notifyIaTinaForaJanela(contact) {
+  try {
+    db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'ia_tina_fora_janela', ?)`)
+      .run(contact.id, JSON.stringify({ phone: contact.phone || null }));
+  } catch (err) {
+    logger.error({ err: err.message, contactId: contact.id }, 'falha ao registrar ia_tina_fora_janela');
+  }
+
+  const nome = contact.name || 'Lead';
+  const tel = contact.phone || '';
+  const msg = `⚠️ *Lead encaminhado pra Tina, mas fora da janela de 24h*\n`
+    + `👤 ${nome}${tel ? ` (${tel})` : ''}\n`
+    + `A Tina não pode iniciar a conversa (regra do WhatsApp: só responde quem falou nas últimas 24h).\n`
+    + `👉 Alguém do time precisa dar o primeiro toque. Quando o lead responder, a Tina assume automaticamente.`;
+
+  await notifyGroupUazapi(msg);
+}
+
 export async function notifyAgendamento(contact, { label, iso, funnel, calendarId }) {
   // Registra sempre no log interno
   try {

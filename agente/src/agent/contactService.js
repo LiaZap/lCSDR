@@ -79,9 +79,12 @@ export function recordOutbound(contactId, { author = 'ia', content, sdr_id = nul
 }
 
 export function countMessagesToday(contactId) {
+  // Conta SÓ as mensagens da IA (author='ia') — a proteção é de CUSTO (tokens da
+  // Tina). Contar inbound/sdr inflava o limite e, com o backfill da continuidade
+  // (que importa histórico do lead/SDR), poderia pausar a IA indevidamente.
   const row = db.prepare(`
     SELECT COUNT(*) as c FROM messages
-    WHERE contact_id = ? AND date(created_at) = date('now')
+    WHERE contact_id = ? AND author = 'ia' AND date(created_at) = date('now')
   `).get(contactId);
   return row?.c || 0;
 }

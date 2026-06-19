@@ -71,11 +71,18 @@ export async function sendMenu(contact, { text, choices, footerText, type = 'but
  *   - {text, buttons?:[{label,value}]}  → texto, ou menu se tiver buttons
  */
 export async function sendSequence(contact, items) {
+  // Retorna o nº de bolhas REALMENTE enviadas. Callers que só querem disparar
+  // ignoram o retorno (comportamento inalterado); quem precisa saber se algo
+  // saiu (ex.: continuidade IA Tina) checa o contador pra não gravar/contabilizar
+  // um envio que falhou.
+  let sent = 0;
   for (const item of items) {
     if (!item) continue;
     try {
+      let delivered = false;
       if (typeof item === 'string') {
         await sendText(contact, item);
+        delivered = true;
       } else if (item.buttons && item.buttons.length) {
         const choices = item.buttons.map(b => `${b.label}|${b.value || b.label}`);
         await sendMenu(contact, {
@@ -84,13 +91,19 @@ export async function sendSequence(contact, items) {
           footerText: item.footerText,
           type: item.buttons.length > 3 ? 'list' : 'button',
         });
+        delivered = true;
       } else if (item.text) {
         await sendText(contact, item.text);
+        delivered = true;
       }
-      // Pausa pequena entre bolhas pra parecer humano
-      await new Promise(r => setTimeout(r, 600));
+      if (delivered) {
+        sent++;
+        // Pausa pequena entre bolhas pra parecer humano
+        await new Promise(r => setTimeout(r, 600));
+      }
     } catch (err) {
       logger.error({ err: err.message, contactId: contact.id }, 'falha enviando mensagem');
     }
   }
+  return sent;
 }

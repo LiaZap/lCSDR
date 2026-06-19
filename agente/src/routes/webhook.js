@@ -9,7 +9,7 @@ import {
 } from '../agent/contactService.js';
 import { generateTinaReply } from '../agent/tina.js';
 import { describeImageBuffer } from '../agent/tina-gemini.js';
-import { sendSequence, sendText } from '../agent/messenger.js';
+import { sendSequence, sendText, preferredChannel } from '../agent/messenger.js';
 import {
   pauseIA, scheduleFollowup, handleSDRReply,
   markQualifiedAndHandoff, markDisqualified, applyTinaTags,
@@ -19,9 +19,9 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina } from '../ghl/opportunities.js';
+import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
-import { notifyAgendamento, notifyLiveHandoff } from '../agent/notify.js';
+import { notifyAgendamento, notifyLiveHandoff, notifyIaTinaForaJanela } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
 
 const router = express.Router();
@@ -116,6 +116,8 @@ router.post('/ghl', async (req, res) => {
       await handleOutbound(event);
     } else if (kind === 'ContactCreate') {
       await handleContactCreate(event);
+    } else if (IA_TINA_TRIGGER_KINDS.includes(kind)) {
+      await handleOpportunityStage(event);
     } else {
       logger.debug({ kind }, 'webhook não tratado');
     }
@@ -282,6 +284,300 @@ async function lastOutboundWasHuman(ghlContactId, localContact) {
     logger.warn({ err: err.message, ghlContactId }, 'falha checando última mensagem; segue sem pausar');
     return false;
   }
+}
+
+// =====================================================================
+// CONTINUIDADE quando o TIME move o card pra coluna "IA Tina"
+// =====================================================================
+// O time arrasta o card pra coluna IA Tina pra dizer "Tina, assume e dá
+// continuidade a esse lead". A Tina puxa a conversa do GHL pro histórico local,
+// lê o contexto e manda uma retomada — DESDE QUE a janela de 24h do WhatsApp
+// esteja aberta (a Meta não deixa iniciar conversa fria sem template).
+//
+// Pré-requisitos:
+//  1) IA_TINA_CONTINUATION_ENABLED=true no .env (opt-in, igual aos outros gates).
+//  2) O GHL precisa MANDAR o evento de mudança de stage pra cá. Recomendado:
+//     Gabriel cria um Workflow no GHL — Trigger "Pipeline Stage Changed" (filtro:
+//     stage = IA Tina) → Action "Webhook" POST p/ /webhook/ghl com customData
+//     incluindo type (default aceito: OpportunityStageUpdate / IaTinaAssumir),
+//     pipelineId, pipelineStageId, contactId e id da oportunidade.
+const IA_TINA_CONTINUATION = process.env.IA_TINA_CONTINUATION_ENABLED === 'true';
+// Tipos de evento que disparam a continuidade (o nome exato do evento nativo do
+// GHL varia; configurável por env. O handler ainda filtra pelo stage IA Tina).
+const IA_TINA_TRIGGER_KINDS = (process.env.IA_TINA_TRIGGER_KINDS
+  || 'OpportunityStageUpdate,OpportunityStatusUpdate,IaTinaAssumir')
+  .split(',').map(s => s.trim()).filter(Boolean);
+// Anti-loop: a PRÓPRIA Tina, ao mover/criar a opp na IA Tina, grava
+// ia_tina_self_moved_at + ia_tina_self_moved_opp. O eco do webhook dessa
+// movimentação é ignorado por CASAMENTO DE OPP ID (forte) dentro de um TTL
+// generoso (cobre atraso/retry de entrega do GHL, que pode passar de 10 min).
+// Sem opp id no payload, cai no TTL temporal puro.
+const SELF_MOVE_TTL_MS = Number(process.env.IA_TINA_SELF_MOVE_TTL_MIN || 30) * 60_000;
+// Cooldown: não re-aborda o mesmo lead em continuidade dentro de N horas (cobre
+// retries do GHL e re-arrasto do card). Re-arrasto legítimo dias depois funciona.
+const CONTINUATION_COOLDOWN_MS = Number(process.env.IA_TINA_CONTINUATION_COOLDOWN_H || 12) * 3600_000;
+const WHATSAPP_WINDOW_MS = 24 * 3600 * 1000;
+
+// Gatilho interno (vira o "turno do usuário" só se a conversa não terminou já
+// com o lead). Bracket sinaliza que NÃO é fala do lead — mesma convenção de
+// [áudio transcrito] / [SDR humano respondeu] já usada no histórico.
+const CONTINUATION_TRIGGER = '[gatilho interno do sistema, NÃO é mensagem do lead: o time te encaminhou este lead agora pra você dar continuidade ao atendimento]';
+const CONTINUATION_CONTEXT = `## CONTINUIDADE DE ATENDIMENTO (importante)
+O time ACABOU de te encaminhar este lead pra você dar continuidade. Leia TODO o histórico acima e:
+- Se o lead deixou uma pergunta ou ficou esperando resposta, responda do ponto onde parou.
+- Se a conversa esfriou, retome de forma calorosa e natural. NÃO se reapresente como se fosse o primeiro contato se já houve conversa antes.
+- NUNCA repita uma mensagem que já foi enviada no histórico.
+- Seja breve e siga o fluxo normal de qualificação. Se ainda não há histórico nenhum, faça uma abertura calorosa.`;
+
+// SQLite guarda DATETIME (CURRENT_TIMESTAMP) como 'YYYY-MM-DD HH:MM:SS' em UTC.
+// True se `dt` está dentro de `ms` a partir de agora.
+function withinMs(dt, ms) {
+  if (!dt) return false;
+  const t = new Date(String(dt).replace(' ', 'T') + 'Z').getTime();
+  return Number.isFinite(t) && (Date.now() - t) < ms;
+}
+
+// Eco da própria movimentação da Tina? Forte = o opp id do evento bate com o que
+// ela acabou de mover/criar. Opp DIFERENTE dentro do TTL → NÃO é eco (é outra
+// opp, provável movimento do time). Sem opp id comparável → conservador (eco
+// dentro do TTL). Isso fecha o furo do guard puramente temporal: um eco/retry do
+// GHL que chega depois do TTL mas com o MESMO opp id ainda é reconhecido.
+function isSelfMoveEcho(row, oppId) {
+  if (!row || !withinMs(row.ia_tina_self_moved_at, SELF_MOVE_TTL_MS)) return false;
+  if (row.ia_tina_self_moved_opp && oppId) return String(row.ia_tina_self_moved_opp) === String(oppId);
+  return true;
+}
+
+// Puxa a conversa do GHL pro banco local (pra Tina ter o histórico REAL ao
+// retomar — inclusive o que um humano falou) e devolve o timestamp (ms) do
+// último INBOUND (pra checar a janela de 24h). Só importa inbound (lead) e
+// outbound HUMANO (sdr): a saída da própria Tina já é local, re-trazer
+// duplicaria. Dedup por ghl_message_id OU por (direção + conteúdo) já existente.
+// Preserva o timestamp original (normalizado p/ o formato do SQLite) pra
+// ordenar certo com as mensagens nativas.
+async function syncConversationFromGHL(contact) {
+  try {
+    const cv = await GHL.searchConversations(contact.ghl_contact_id);
+    const conv = cv?.conversations?.[0] || cv?.[0];
+    if (!conv?.id) return { lastInboundMs: 0, imported: 0 };
+    const m = await GHL.getMessages(conv.id, { limit: 50 });
+    let ms = m?.messages?.messages || m?.messages || m || [];
+    if (!Array.isArray(ms)) ms = [];
+    ms = [...ms].sort((a, b) =>
+      new Date(a.dateAdded || a.createdAt || 0) - new Date(b.dateAdded || b.createdAt || 0));
+
+    let lastInboundMs = 0, imported = 0;
+    for (const x of ms) {
+      const dir = (x.direction || '').toLowerCase();
+      if (dir !== 'inbound' && dir !== 'outbound') continue;
+      const ts = new Date(x.dateAdded || x.createdAt || 0).getTime();
+      if (dir === 'inbound' && ts) lastInboundMs = Math.max(lastInboundMs, ts);
+
+      const body = typeof x.body === 'string' ? x.body
+        : (typeof x.message === 'string' ? x.message : '');
+      const text = (body || '').trim();
+      if (!text) continue; // pula mídia-only / sem texto
+
+      const uid = x.userId || x.user_id || x.sentBy?.id;
+      const isHuman = !!uid && !AUTO_SOURCES.has(String(x.source || '').toLowerCase());
+      // Saída sem userId = Tina via API (já está local) → não reimporta.
+      if (dir === 'outbound' && !isHuman) continue;
+      const author = dir === 'inbound' ? 'lead' : 'sdr';
+
+      const gid = x.id || x.messageId;
+      const dup = db.prepare(
+        `SELECT 1 FROM messages WHERE contact_id = ? AND (
+            (ghl_message_id IS NOT NULL AND ghl_message_id = ?) OR
+            (direction = ? AND TRIM(content) = ?)
+         ) LIMIT 1`
+      ).get(contact.id, gid ? String(gid) : ' ', dir, text);
+      if (dup) continue;
+
+      const createdAt = ts ? new Date(ts).toISOString().slice(0, 19).replace('T', ' ') : null;
+      db.prepare(
+        `INSERT INTO messages (contact_id, ghl_message_id, direction, author, content, content_type, created_at)
+         VALUES (?, ?, ?, ?, ?, 'text', COALESCE(?, CURRENT_TIMESTAMP))`
+      ).run(contact.id, gid ? String(gid) : null, dir, author, text, createdAt);
+      imported++;
+    }
+    return { lastInboundMs, imported };
+  } catch (err) {
+    logger.warn({ err: err.message, contactId: contact.id }, 'falha sincronizando conversa do GHL p/ continuidade');
+    return { lastInboundMs: 0, imported: 0 };
+  }
+}
+
+// Handler do evento "opp mudou de stage". Age SÓ quando a opp foi pra coluna
+// IA Tina do pipeline da Tina, e a movimentação NÃO foi da própria Tina.
+async function handleOpportunityStage(event) {
+  if (!IA_TINA_CONTINUATION) return;
+  const { pipelineId, stageIaTina } = resolvePipeline();
+  if (!stageIaTina) return;
+
+  // Normaliza (o GHL varia muito o nome dos campos entre webhook e REST).
+  const stageId = event.pipelineStageId || event.stageId || event.pipeline_stage_id
+    || event.opportunity?.pipelineStageId || event.opportunity?.stageId || null;
+  const oppPipelineId = event.pipelineId || event.opportunity?.pipelineId || null;
+  const oppId = event.opportunityId || event.opportunity?.id || event.id || null;
+  // ATENÇÃO: event.contactId tem fallback p/ rawBody.id (que num evento de opp é o
+  // ID DA OPORTUNIDADE) — não confiar cegamente. Prioriza contato aninhado/explícito.
+  let ghlContactId = event.contact?.id || event.opportunity?.contactId || event.contact_id || null;
+  if (!ghlContactId && event.contactId && event.contactId !== oppId) ghlContactId = event.contactId;
+
+  // Só age quando foi pra coluna IA Tina do pipeline da Tina.
+  if (!stageId || stageId !== stageIaTina) return;
+  if (oppPipelineId && pipelineId && oppPipelineId !== pipelineId) return;
+  if (!ghlContactId) {
+    logger.warn({ oppId, kind: event.type }, 'evento de stage IA Tina sem contactId resolvível — ignorando');
+    return;
+  }
+
+  // ANTI-LOOP: se a PRÓPRIA Tina acabou de mover esta opp, ignora o eco (imune ao
+  // quirk do PIT carimbar userId). Checagem barata antes de hidratar/locar.
+  const known = db.prepare('SELECT id, ia_tina_self_moved_at, ia_tina_self_moved_opp FROM contacts WHERE ghl_contact_id = ?').get(ghlContactId);
+  if (isSelfMoveEcho(known, oppId)) {
+    logger.info({ ghlContactId, contactId: known.id, oppId }, 'movimentação IA Tina foi da própria Tina (anti-loop), ignorando');
+    return;
+  }
+
+  // Hidrata o contato do GHL (nome, phone, TAGS).
+  let ghlContact;
+  try {
+    ghlContact = await GHL.getContact(ghlContactId);
+  } catch (err) {
+    logger.warn({ err: err.message, ghlContactId }, 'continuidade IA Tina: falha ao buscar contato');
+    return;
+  }
+  const tags = extractTags(ghlContact);
+
+  // Bloqueios duros vencem o move: origem bloqueada (Lilian) e pausa explícita.
+  if (BLOCK_TAGS.length && BLOCK_TAGS.find(t => tags.includes(t))) {
+    logger.info({ ghlContactId }, 'continuidade IA Tina: lead de origem bloqueada, ignorando');
+    return;
+  }
+  if (tags.includes(PAUSE_TAG)) {
+    logger.info({ ghlContactId }, 'continuidade IA Tina: lead com tag de pausa, ignorando');
+    return;
+  }
+
+  const contact = upsertContactFromGHL(ghlContact);
+
+  // O move PRA IA Tina É a autorização do time → garante a tag de liberação
+  // (senão o whitelist barraria as próximas mensagens do lead).
+  if (REQUIRED_TAG_ENABLED && !tags.includes(REQUIRED_TAG)) {
+    try { await GHL.addTag(ghlContactId, REQUIRED_TAG); } catch {}
+  }
+
+  await withContactLock(contact.id, async () => {
+    const fresh = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id);
+    if (!fresh) return;
+
+    // Re-checa anti-loop e cooldown DENTRO do lock (fecha corrida entre o eco da
+    // própria Tina / retries simultâneos).
+    if (isSelfMoveEcho(fresh, oppId)) return;
+    if (withinMs(fresh.ia_tina_continuation_at, CONTINUATION_COOLDOWN_MS)) {
+      logger.info({ contactId: fresh.id }, 'continuidade IA Tina em cooldown, ignorando');
+      return;
+    }
+
+    // Puxa a conversa real do GHL pro histórico local + pega o último inbound.
+    const { lastInboundMs } = await syncConversationFromGHL(fresh);
+
+    // Janela de 24h do WhatsApp (só restringe no canal oficial GHL/Meta). Usa o
+    // MAIOR entre o inbound vindo do GHL e o last_inbound_at LOCAL — esse é
+    // autoritativo e sobrevive a falha de leitura do GHL; senão um hiccup de API
+    // (ou um inbound sem timestamp) fecharia a janela à toa e dispararia um
+    // alerta "fora da janela" falso.
+    const localInboundMs = fresh.last_inbound_at
+      ? new Date(String(fresh.last_inbound_at).replace(' ', 'T') + 'Z').getTime() : 0;
+    const effInboundMs = Math.max(lastInboundMs || 0, Number.isFinite(localInboundMs) ? localInboundMs : 0);
+    const windowOpen = effInboundMs && (Date.now() - effInboundMs) < WHATSAPP_WINDOW_MS;
+    if (preferredChannel() === 'ghl' && !windowOpen) {
+      logger.info({ contactId: fresh.id, effInboundMs }, 'continuidade IA Tina: fora da janela 24h, avisando time');
+      // Deixa a Tina pronta pra assumir quando o lead responder (reabre a janela).
+      db.prepare(`UPDATE contacts SET ai_paused = 0, ai_paused_at = NULL,
+          stage = CASE WHEN stage IS NULL OR stage IN ('novo','desqualificado','handoff','agendado') THEN 'pre_qualificando' ELSE stage END,
+          updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(fresh.id);
+      await notifyIaTinaForaJanela(fresh).catch(() => {});
+      return;
+    }
+
+    // Gera a retomada. extraContext instrui a retomar do ponto onde parou.
+    const result = await generateTinaReply({
+      contact: fresh,
+      incomingText: CONTINUATION_TRIGGER,
+      extraContext: CONTINUATION_CONTEXT,
+    });
+    const items = result.split && result.split.length ? result.split : [result.reply];
+    const temTexto = items.some(i => (typeof i === 'string' ? i : i?.text || '').trim());
+    if (!temTexto) {
+      logger.warn({ contactId: fresh.id }, 'continuidade IA Tina: LLM não gerou texto, abortando');
+      return;
+    }
+
+    const sent = await sendSequence(fresh, items);
+    if (!sent) {
+      // Nada saiu (falha de envio/canal — ex.: Meta rejeitou apesar do pré-check).
+      // NÃO grava outbound fantasma, NÃO queima o cooldown e avisa o time pra dar
+      // o toque manual (senão o card fica "atendido" e o lead, mudo).
+      logger.warn({ contactId: fresh.id }, 'continuidade IA Tina: nenhuma mensagem enviada (falha de envio), avisando time');
+      await notifyIaTinaForaJanela(fresh).catch(() => {});
+      return;
+    }
+    for (const item of items) {
+      const txt = typeof item === 'string' ? item : (item?.text || '');
+      if (txt) recordOutbound(fresh.id, { author: 'ia', content: txt, usage: result.usage });
+    }
+
+    // Marca continuidade + libera a Tina + ajusta funil/stage/qualificação.
+    db.prepare(`UPDATE contacts SET
+        ia_tina_continuation_at = CURRENT_TIMESTAMP,
+        ai_paused = 0, ai_paused_at = NULL,
+        funnel = COALESCE(?, funnel),
+        stage = COALESCE(?, CASE WHEN stage IS NULL OR stage IN ('novo','desqualificado','handoff','agendado') THEN 'pre_qualificando' ELSE stage END),
+        qualification_score = ?,
+        qualification_notes = COALESCE(?, qualification_notes),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`).run(
+        result.funnel || null,
+        result.stage || null,
+        result.qualification_score || fresh.qualification_score || 0,
+        result.qualification_notes || null,
+        fresh.id,
+      );
+    try { await applyTinaTags(fresh, result); } catch {}
+
+    // Roteamento: se a Tina JÁ encaminhou/qualificou/desqualificou NESTE turno de
+    // retomada (o lead tinha deixado um pedido pendente), respeita a ação — mesma
+    // lógica do handleInbound. Senão ela "fala" o handoff mas nada acontece até o
+    // lead responder. Sem book_slot aqui: a continuidade não injeta horários no
+    // contexto, então um book_slot seria alucinação (não marca).
+    try {
+      const SCHED = schedulingEnabled();
+      if (result.handoff_mode === 'agora') {
+        const lh = await liveHandoff(fresh).catch(() => ({ ok: false }));
+        await markQualifiedAndHandoff(fresh, result, { pause: true }).catch(() => {});
+        db.prepare(`UPDATE contacts SET ai_paused = 1, ai_paused_at = CURRENT_TIMESTAMP, stage = 'em_atendimento', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(fresh.id);
+        await notifyLiveHandoff(fresh, { consultant: lh?.consultant, funnel: result.funnel || fresh.funnel }).catch(() => {});
+      } else if (result.handoff_mode === 'agendar' && SCHED) {
+        db.prepare(`UPDATE contacts SET stage = 'agendando', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(fresh.id);
+        db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(fresh.id);
+        await markQualifiedAndHandoff(fresh, result, { pause: false }).catch(() => {});
+      } else if (result.handoff || result.stage === 'qualificado') {
+        await markQualifiedAndHandoff(fresh, result, { pause: false }).catch(() => {});
+      } else if (result.stage === 'desqualificado' || result.end_conversation) {
+        await markDisqualified(fresh, result).catch(() => {});
+      }
+    } catch (err) {
+      logger.error({ err: err.message, contactId: fresh.id }, 'continuidade IA Tina: falha no roteamento pós-retomada');
+    }
+
+    try {
+      db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'ia_tina_continuation', ?)`)
+        .run(fresh.id, JSON.stringify({ oppId, bubbles: items.length }));
+    } catch {}
+    logger.info({ contactId: fresh.id, oppId }, 'continuidade IA Tina enviada');
+  });
 }
 
 async function handleInbound(event) {

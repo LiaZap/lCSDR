@@ -18,7 +18,7 @@ const DEFAULT_PIPELINE_ID = 'MfDNcFdH03j0ZBuwJDYM';
 const DEFAULT_STAGE_QUALIFIED = '0c040fa3-3ed5-449f-ab07-c7b3fb40f97c'; // Aguardando Atendimento
 const DEFAULT_STAGE_IA_TINA = '74164182-d3b0-447b-a761-3bdcd6d47eac';    // IA Tina
 
-function resolvePipeline() {
+export function resolvePipeline() {
   if (PIPELINE_CACHE) return PIPELINE_CACHE;
   PIPELINE_CACHE = {
     pipelineId: process.env.GHL_PIPELINE_ID || DEFAULT_PIPELINE_ID,
@@ -34,6 +34,18 @@ function resolvePipeline() {
 function pickOpenOpp(ops, pipelineId) {
   const open = (Array.isArray(ops) ? ops : []).filter(o => String(o.status || 'open').toLowerCase() === 'open');
   return open.find(o => o.pipelineId === pipelineId) || open[0] || null;
+}
+
+// Marca que foi a PRÓPRIA Tina que moveu/criou a opp na IA Tina. O handler do
+// webhook de mudança de stage (handleOpportunityStage) usa isso pra IGNORAR o
+// evento gerado pela própria movimentação (anti-loop) — imune ao quirk de
+// alguns PITs carimbarem userId nas escritas via API.
+function markSelfMove(contact, oppId = null) {
+  if (!contact?.id) return;
+  try {
+    db.prepare('UPDATE contacts SET ia_tina_self_moved_at = CURRENT_TIMESTAMP, ia_tina_self_moved_opp = ? WHERE id = ?')
+      .run(oppId ? String(oppId) : null, contact.id);
+  } catch { /* coluna pode não existir em banco muito antigo; segue */ }
 }
 
 // Cria oportunidade no pipeline "Qualificado" quando a Iara qualifica.
@@ -140,6 +152,7 @@ export async function claimToIaTina(contact) {
       // Só reorganiza DENTRO do pipeline da Tina (Pré-Vendas LCA). Não puxa opp
       // de OUTRO pipeline (Closers/Editorial) pra não bagunçar o board deles.
       if (opp.pipelineId && opp.pipelineId !== pipelineId) return opp.id;
+      markSelfMove(contact, opp.id);
       await GHL.updateOpportunity(opp.id, { pipelineId, pipelineStageId: stageIaTina, status: 'open' });
       return opp.id;
     }
@@ -147,7 +160,9 @@ export async function claimToIaTina(contact) {
       pipelineId, stageId: stageIaTina, contactId: contact.ghl_contact_id,
       name: `${contact.name || 'Lead'} · IA Tina`,
     });
-    return created?.opportunity?.id || created?.id || null;
+    const newId = created?.opportunity?.id || created?.id || null;
+    markSelfMove(contact, newId);
+    return newId;
   } catch (err) {
     logger.warn({ err: err.message, contactId: contact.id }, 'falha reivindicando lead p/ IA Tina; segue');
     return null;
@@ -172,7 +187,9 @@ export async function moveLeadToIaTina(contact) {
       pipelineId, stageId: stageIaTina, contactId: contact.ghl_contact_id,
       name: `${contact.name || 'Lead'} · IA Tina`,
     });
-    return created?.opportunity?.id || created?.id || null;
+    const newId = created?.opportunity?.id || created?.id || null;
+    markSelfMove(contact, newId);
+    return newId;
   } catch (err) {
     logger.warn({ err: err.message, contactId: contact.id }, 'falha criando opp na IA Tina; segue');
     return null;
