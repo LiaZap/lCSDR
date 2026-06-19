@@ -18,6 +18,9 @@ import { handleOpportunityStage } from '../src/routes/webhook.js';
 
 const SEND = process.argv.includes('--send');
 const DELAY_MS = Number(process.env.CONTINUAR_DELAY_MS || 5000);
+// Pula lead com outbound RECENTE (a Tina/SDR já está conversando agora) — a
+// varredura é pra reviver lead PARADO, não pra cutucar conversa ativa.
+const SKIP_RECENT_MS = Number(process.env.CONTINUAR_SKIP_RECENT_H || 3) * 3600_000;
 const { stageIaTina } = resolvePipeline();
 const B = process.env.GHL_API_BASE || 'https://services.leadconnectorhq.com';
 const H = {
@@ -45,6 +48,14 @@ async function fetchStage(stageId) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// Conversa ativa? (Tina/SDR mandou algo nas últimas N horas — não cutuca.)
+function talkedRecently(cid) {
+  const row = db.prepare('SELECT last_outbound_at FROM contacts WHERE ghl_contact_id = ?').get(cid);
+  if (!row?.last_outbound_at) return false;
+  const t = new Date(String(row.last_outbound_at).replace(' ', 'T') + 'Z').getTime();
+  return Number.isFinite(t) && (Date.now() - t) < SKIP_RECENT_MS;
+}
+
 if (!stageIaTina) { console.error('stageIaTina não resolvido (config do pipeline)'); process.exit(1); }
 if (!process.env.GHL_API_TOKEN || !process.env.GHL_LOCATION_ID) { console.error('GHL_API_TOKEN/GHL_LOCATION_ID ausentes'); process.exit(1); }
 
@@ -54,12 +65,17 @@ console.log(`\nColuna IA Tina (open): ${ops.length} oportunidade(s)\n`);
 // Marca o instante (UTC, formato do SQLite) pra resumir só os eventos desta rodada.
 const t0 = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-let disparados = 0;
+let disparados = 0, pulados = 0;
 for (const o of ops) {
   const c = o.contact || {};
   const cid = o.contactId || c.id;
   const name = c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || o.name || '';
   if (!cid) { console.log(`  ⚠️  (opp ${o.id}) sem contactId, pulando`); continue; }
+  if (talkedRecently(cid)) {
+    console.log(`  ⏭️  ${(name || cid).slice(0, 26).padEnd(26)} | pula (conversa ativa, outbound recente)`);
+    pulados++;
+    continue;
+  }
   if (SEND) {
     try {
       // Mesmo caminho do webhook: type dedicado + _force pra rodar sem o flag.
@@ -76,7 +92,7 @@ for (const o of ops) {
 }
 
 console.log(`\n──────── resumo ────────`);
-console.log(`Na coluna IA Tina: ${ops.length}` + (SEND ? ` | disparados: ${disparados}` : ''));
+console.log(`Na coluna IA Tina: ${ops.length}` + (SEND ? ` | disparados: ${disparados}` : ` | iriam retomar: ${ops.length - pulados}`) + ` | pulados (conversa ativa): ${pulados}`);
 if (SEND) {
   // O handler grava o DESFECHO real em events_log; resume o que rolou nesta rodada.
   const ev = db.prepare(
