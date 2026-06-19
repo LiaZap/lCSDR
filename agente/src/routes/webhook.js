@@ -409,8 +409,10 @@ async function syncConversationFromGHL(contact) {
 
 // Handler do evento "opp mudou de stage". Age SÓ quando a opp foi pra coluna
 // IA Tina do pipeline da Tina, e a movimentação NÃO foi da própria Tina.
-async function handleOpportunityStage(event) {
-  if (!IA_TINA_CONTINUATION) return;
+export async function handleOpportunityStage(event) {
+  // Gate de produção (opt-in). O script de varredura passa _force:true pra rodar
+  // a continuidade em lote sem depender do flag (ação manual e explícita).
+  if (!IA_TINA_CONTINUATION && !event._force) return;
   const { pipelineId, stageIaTina } = resolvePipeline();
   if (!stageIaTina) return;
 
