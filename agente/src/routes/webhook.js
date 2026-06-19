@@ -342,13 +342,13 @@ async function handleInbound(event) {
     }
   }
 
-  // 1.56) RAIA DA TINA: ela só atende lead na coluna "IA Tina"/"Aguardando
-  // Atendimento" ou SEM oportunidade (lead novo). Se o lead tem opp aberta em
-  // QUALQUER outro funil do time (Reentrada, Follow Up, Aplicação, Proposta,
-  // captação, Closers...), a Tina NÃO assume. Roda em toda msg (pega
-  // re-engajamento). Pula leads pausados. Não pausa o lead (re-avalia a cada
-  // msg — se ele entrar na raia dela depois, ela assume). Falha aberto.
-  if (SKIP_IN_ATTENDANCE && !contact.ai_paused) {
+  // 1.56) GATE POR COLUNA — DESLIGADO por padrão (LANE_GATE_ENABLED=true p/ ligar).
+  // A varredura (jun/2026) mostrou que a COLUNA da opp é um sinal RUIM: leads de
+  // anúncio/form VOLTAM com opp velha em Follow Up/Closers, então bloquear por
+  // coluna barraria os próprios leads de anúncio que a Tina precisa atender. A
+  // proteção de colisão correta é por MENSAGEM (consultor respondeu recente — ver
+  // lastOutboundWasHuman / AUTO_HUMAN_DETECTION abaixo).
+  if (process.env.LANE_GATE_ENABLED === 'true' && !contact.ai_paused) {
     const oppHit = await contactOppOutsideTinaLane(contact);
     if (oppHit) {
       logger.info({ ghlContactId, contactId: contact.id, stage: oppHit.pipelineStageId }, 'lead fora da raia da Tina (opp em funil do time), Tina não assume');
