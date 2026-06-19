@@ -120,7 +120,7 @@ export async function contactOppOutsideTinaLane(contact) {
 // cria). NÃO reabre won/lost. Uso INTENCIONAL (script de re-engajamento) — aí o
 // lead entra na raia da Tina e ela passa a tratar as respostas dele.
 export async function claimToIaTina(contact) {
-  const { pipelineId, stageIaTina } = resolvePipeline();
+  const { pipelineId, stageIaTina, stageQualified } = resolvePipeline();
   if (!pipelineId || !stageIaTina || !contact?.ghl_contact_id) return null;
   try {
     const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
@@ -128,7 +128,9 @@ export async function claimToIaTina(contact) {
     const opp = ops[0];
     if (opp) {
       const status = String(opp.status || 'open').toLowerCase();
-      if (status === 'won' || status === 'lost' || opp.pipelineStageId === stageIaTina) return opp.id;
+      // Não mexe: fechado, já na IA Tina, ou já em Aguardando Atendimento
+      // (qualificado/handoff — não puxa de volta pra IA Tina).
+      if (status === 'won' || status === 'lost' || opp.pipelineStageId === stageIaTina || opp.pipelineStageId === stageQualified) return opp.id;
       // Só reorganiza DENTRO do pipeline da Tina (Pré-Vendas LCA). Não puxa opp
       // de OUTRO pipeline (Closers/Editorial) pra não bagunçar o board deles.
       if (opp.pipelineId && opp.pipelineId !== pipelineId) return opp.id;
