@@ -19,7 +19,7 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { contactInBlockedOppStage, moveLeadToIaTina } from '../ghl/opportunities.js';
+import { contactOppOutsideTinaLane, moveLeadToIaTina } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
@@ -342,19 +342,20 @@ async function handleInbound(event) {
     }
   }
 
-  // 1.56) FILTRO REENTRADA: se o lead tem oportunidade aberta numa stage que o
-  // TIME trabalha (ex: "Reentrada"), a Tina NÃO assume — é re-trabalho do time.
-  // Roda em TODA mensagem (não só 1º contato) p/ pegar re-engajamento. Pula
-  // leads já pausados (economia de chamada). Falha aberto. Configurável via env.
+  // 1.56) RAIA DA TINA: ela só atende lead na coluna "IA Tina"/"Aguardando
+  // Atendimento" ou SEM oportunidade (lead novo). Se o lead tem opp aberta em
+  // QUALQUER outro funil do time (Reentrada, Follow Up, Aplicação, Proposta,
+  // captação, Closers...), a Tina NÃO assume. Roda em toda msg (pega
+  // re-engajamento). Pula leads pausados. Não pausa o lead (re-avalia a cada
+  // msg — se ele entrar na raia dela depois, ela assume). Falha aberto.
   if (SKIP_IN_ATTENDANCE && !contact.ai_paused) {
-    const oppHit = await contactInBlockedOppStage(contact);
+    const oppHit = await contactOppOutsideTinaLane(contact);
     if (oppHit) {
-      logger.info({ ghlContactId, contactId: contact.id, stage: oppHit.pipelineStageId }, 'lead em stage de reentrada/time, Tina não assume');
+      logger.info({ ghlContactId, contactId: contact.id, stage: oppHit.pipelineStageId }, 'lead fora da raia da Tina (opp em funil do time), Tina não assume');
       try {
-        db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_reentrada', ?)`)
+        db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_fora_raia', ?)`)
           .run(contact.id, JSON.stringify({ stage: oppHit.pipelineStageId }));
       } catch {}
-      handleSDRReply(contact.id, null);
       return;
     }
   }

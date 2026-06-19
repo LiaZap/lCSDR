@@ -16,6 +16,7 @@ import { db } from '../src/db/index.js';
 import { GHL } from '../src/ghl/client.js';
 import { upsertContactFromGHL, recordOutbound } from '../src/agent/contactService.js';
 import { sendText } from '../src/agent/messenger.js';
+import { claimToIaTina } from '../src/ghl/opportunities.js';
 
 const SEND = process.argv.includes('--send');
 const STAGE = process.env.ORGANICO_STAGE_ID || 'd596db34-ada4-4e7a-936a-943a9410d9a6'; // Funil Orgânico (Pré-Vendas LCA)
@@ -112,6 +113,9 @@ for (const o of ops) {
       await sendText(local, txt);
       recordOutbound(local.id, { author: 'ia', content: txt });
       if (REQUIRED_TAG && REQUIRED_TAG !== 'false') { try { await GHL.addTag(cid, REQUIRED_TAG); } catch {} }
+      // Reivindica o lead pra raia da Tina (move a opp pro IA Tina). Sem isso,
+      // o filtro "raia da Tina" bloquearia a resposta dele (opp em Funil Orgânico).
+      await claimToIaTina(local).catch(() => {});
       db.prepare("UPDATE contacts SET stage='pre_qualificando', ai_paused=0, ai_paused_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(local.id);
       db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'reengajamento_organico', ?)`).run(local.id, JSON.stringify({ stage: STAGE }));
       enviados++;

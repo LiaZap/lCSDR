@@ -89,20 +89,52 @@ function blockedOppStages() {
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 }
 
-// Retorna a oportunidade aberta do lead que está numa stage bloqueada (time
-// re-trabalhando), ou null. Falha ABERTO (erro → null → Tina segue normal).
-export async function contactInBlockedOppStage(contact) {
-  const stages = blockedOppStages();
-  if (!stages.length || !contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return null;
+// A "RAIA" da Tina (allowlist, default-deny). Ela só atende lead cuja
+// oportunidade está na IA Tina ou na Aguardando Atendimento (qualificado/
+// agendando que ela mesma conduz), OU que NÃO tem oportunidade (lead novo). Se
+// há opp ABERTA em QUALQUER outra coluna (Reentrada, Follow Up, Aplicação,
+// Proposta, funis de captação, Closers...), é trabalho de OUTRO → retorna a opp
+// pra bloquear. Falha ABERTO (erro → null → Tina segue normal).
+export async function contactOppOutsideTinaLane(contact) {
+  const { stageIaTina, stageQualified } = resolvePipeline();
+  if (!contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return null;
+  const lane = new Set([stageIaTina, stageQualified].filter(Boolean)); // IA Tina + Aguardando Atendimento
   try {
     const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
     const ops = r?.opportunities || (Array.isArray(r) ? r : []);
     return ops.find(o =>
-      stages.includes(o.pipelineStageId)
-      && String(o.status || 'open').toLowerCase() === 'open'
+      String(o.status || 'open').toLowerCase() === 'open'
+      && !lane.has(o.pipelineStageId)
     ) || null;
   } catch (err) {
-    logger.warn({ err: err.message, contactId: contact.id }, 'falha checando stage de oportunidade (reentrada); segue');
+    logger.warn({ err: err.message, contactId: contact.id }, 'falha checando raia da Tina (opp); segue');
+    return null;
+  }
+}
+
+// Reivindica o lead pra Tina (re-engajamento ATIVO): move a opp pra IA Tina (ou
+// cria). NÃO reabre won/lost. Uso INTENCIONAL (script de re-engajamento) — aí o
+// lead entra na raia da Tina e ela passa a tratar as respostas dele.
+export async function claimToIaTina(contact) {
+  const { pipelineId, stageIaTina } = resolvePipeline();
+  if (!pipelineId || !stageIaTina || !contact?.ghl_contact_id) return null;
+  try {
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
+    const ops = r?.opportunities || (Array.isArray(r) ? r : []);
+    const opp = ops[0];
+    if (opp) {
+      const status = String(opp.status || 'open').toLowerCase();
+      if (status === 'won' || status === 'lost' || opp.pipelineStageId === stageIaTina) return opp.id;
+      await GHL.updateOpportunity(opp.id, { pipelineId, pipelineStageId: stageIaTina, status: 'open' });
+      return opp.id;
+    }
+    const created = await GHL.createOpportunity({
+      pipelineId, stageId: stageIaTina, contactId: contact.ghl_contact_id,
+      name: `${contact.name || 'Lead'} · IA Tina`,
+    });
+    return created?.opportunity?.id || created?.id || null;
+  } catch (err) {
+    logger.warn({ err: err.message, contactId: contact.id }, 'falha reivindicando lead p/ IA Tina; segue');
     return null;
   }
 }

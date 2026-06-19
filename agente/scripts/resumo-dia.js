@@ -69,7 +69,7 @@ console.log('   Aluno do curso (cursos@):    ' + countToday('handoff_aluno'));
 // Proteções
 console.log('\n🛡️  Proteções:');
 console.log('   Pulou (já em atendimento):   ' + (countToday('skip_em_atendimento') + countToday('skip_ja_atribuido')));
-console.log('   Pulou (reentrada/time):      ' + countToday('skip_reentrada'));
+console.log('   Pulou (fora da raia/time):   ' + (countToday('skip_fora_raia') + countToday('skip_reentrada')));
 console.log('   Double-booking evitado:      ' + countToday('double_booking_evitado'));
 console.log('   Trava de preço atuou:        ' + countToday('policy_guard'));
 
