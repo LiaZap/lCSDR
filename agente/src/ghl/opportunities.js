@@ -98,7 +98,11 @@ function blockedOppStages() {
 export async function contactOppOutsideTinaLane(contact) {
   const { stageIaTina, stageQualified } = resolvePipeline();
   if (!contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return null;
-  const lane = new Set([stageIaTina, stageQualified].filter(Boolean)); // IA Tina + Aguardando Atendimento
+  // Raia da Tina = IA Tina + Aguardando Atendimento + funis de ENTRADA onde caem
+  // os leads de anúncio/captação que ela DEVE qualificar (env GHL_TINA_LANE_STAGES,
+  // CSV de stageIds). Setar os funis de entrada lá pra a Tina atender os anúncios.
+  const extra = (process.env.GHL_TINA_LANE_STAGES || '').split(',').map(s => s.trim()).filter(Boolean);
+  const lane = new Set([stageIaTina, stageQualified, ...extra].filter(Boolean));
   try {
     const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
     const ops = r?.opportunities || (Array.isArray(r) ? r : []);
