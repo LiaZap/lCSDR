@@ -35,11 +35,18 @@ export async function createOrMoveOpportunityQualified(contact, { funnel, score,
   if (!pipelineId || !stageQualified) return null;
 
   try {
-    // Verifica se já existe oportunidade aberta
-    const existing = await GHL.getOpportunitiesByContact(contact.ghl_contact_id).catch(() => null);
+    // Verifica se já existe oportunidade aberta. SEM `.catch` inline: se a busca
+    // FALHAR (rede/5xx/401), o erro sobe pro catch externo e retorna null SEM
+    // criar — senão duplicaria a oportunidade (falha de API ≠ "não tem opp").
+    const existing = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
     const opp = existing?.opportunities?.[0] || existing?.[0];
 
     if (opp) {
+      const cur = opp.pipelineStageId;
+      const status = String(opp.status || 'open').toLowerCase();
+      // Não reabre negócio fechado (won/lost) nem rouba lead que o time está
+      // re-trabalhando (stage bloqueada). Só move o que está livre pra handoff.
+      if (status === 'won' || status === 'lost' || blockedOppStages().includes(cur)) return opp.id;
       // Manda `pipelineId` junto: sem ele, o GHL valida o stage contra o
       // pipeline ATUAL da oportunidade — se ela estiver em outro pipeline (ex.:
       // já foi movida pros Closers), o stage não bate e dá 400. Com o
@@ -100,31 +107,27 @@ export async function contactInBlockedOppStage(contact) {
   }
 }
 
-// Coloca o lead na coluna "IA Tina" enquanto a Tina trabalha (antes de
-// qualificar): dá visibilidade ao time e evita o lead cair na reentrada durante
-// o atendimento. Conservador: NÃO mexe se já está numa stage do time
-// (bloqueada), nem se já foi qualificado (Aguardando Atendimento), nem se já
-// está na IA Tina. Cria a oportunidade se não existir. Falha aberto.
+// Coloca o lead na coluna "IA Tina" pra dar visibilidade ao time enquanto a
+// Tina qualifica. SEGURO (default-deny): só CRIA uma oportunidade na IA Tina
+// quando o lead NÃO tem nenhuma aberta. Se JÁ existe opp (de quem for, em
+// qualquer stage), NÃO mexe — não rouba lead do time nem rebaixa stage. SEM
+// `.catch` inline na busca: erro de API → catch externo → NÃO cria (não
+// duplica). Falha aberto.
 export async function moveLeadToIaTina(contact) {
-  const { pipelineId, stageQualified, stageIaTina } = resolvePipeline();
+  const { pipelineId, stageIaTina } = resolvePipeline();
   if (!pipelineId || !stageIaTina || !contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return null;
   try {
-    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id).catch(() => null);
-    const opp = r?.opportunities?.[0] || r?.[0];
-    if (opp) {
-      const cur = opp.pipelineStageId;
-      if (cur === stageIaTina || cur === stageQualified) return opp.id; // já na IA Tina ou já handoff
-      if (blockedOppStages().includes(cur)) return opp.id;              // stage do time → não rouba
-      await GHL.updateOpportunity(opp.id, { pipelineId, pipelineStageId: stageIaTina, status: 'open' });
-      return opp.id;
-    }
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
+    const ops = r?.opportunities || (Array.isArray(r) ? r : []);
+    if (ops.length) return ops[0].id; // já tem opp → não mexe (não rouba/duplica/rebaixa)
+    // Só chega aqui se a busca teve SUCESSO e o lead não tem nenhuma opp.
     const created = await GHL.createOpportunity({
       pipelineId, stageId: stageIaTina, contactId: contact.ghl_contact_id,
       name: `${contact.name || 'Lead'} · IA Tina`,
     });
     return created?.opportunity?.id || created?.id || null;
   } catch (err) {
-    logger.warn({ err: err.message, contactId: contact.id }, 'falha movendo lead p/ IA Tina; segue');
+    logger.warn({ err: err.message, contactId: contact.id }, 'falha criando opp na IA Tina; segue');
     return null;
   }
 }

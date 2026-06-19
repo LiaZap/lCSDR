@@ -673,9 +673,10 @@ async function handleInbound(event) {
       await markDisqualified(fresh, result);
 
     } else {
-      // Tina ainda qualificando: coloca o lead na coluna "IA Tina" (visibilidade
-      // pro time + não cai na reentrada enquanto ela atende) e agenda follow-up.
-      await moveLeadToIaTina(fresh).catch(() => {});
+      // Tina ainda qualificando: se JÁ identificou o funil (lead real, não só um
+      // "oi"), coloca na coluna "IA Tina" pra dar visibilidade ao time. Sem funil
+      // ainda, não cria oportunidade à toa (evita poluir o board com curioso).
+      if (result.funnel || fresh.funnel) await moveLeadToIaTina(fresh).catch(() => {});
       scheduleFollowup(fresh.id, 'silencio_lead');
     }
   });
