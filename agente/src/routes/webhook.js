@@ -19,7 +19,7 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline } from '../ghl/opportunities.js';
+import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff, notifyIaTinaForaJanela } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
@@ -626,15 +626,27 @@ async function handleInbound(event) {
   // atendimento → a Tina não assume. Não atrapalha conversas que ela já toca.
   if (SKIP_IN_ATTENDANCE && !contact.last_outbound_at) {
     if (await conversationAlreadyInAttendance(ghlContactId)) {
-      logger.info({ ghlContactId, contactId: contact.id }, 'lead já estava em atendimento humano (conversa pré-existente), Tina não assume');
-      // Log auditável: pra você acompanhar quantas vezes o filtro atuou e
-      // checar se não está bloqueando lead que devia atender (resumo-dia).
-      try {
-        db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_em_atendimento', ?)`)
-          .run(contact.id, JSON.stringify({ ghlContactId }));
-      } catch {}
-      handleSDRReply(contact.id, null);
-      return;
+      // EXCEÇÃO: se o TIME colocou o lead na coluna IA Tina, isso É a autorização
+      // pra Tina assumir — ela responde e qualifica mesmo com histórico de humano
+      // (foi o caso reportado: time move o lead pra IA Tina pra ela continuar).
+      if (await contactInIaTinaLane(contact)) {
+        logger.info({ ghlContactId, contactId: contact.id }, 'lead com histórico de humano MAS na coluna IA Tina — Tina assume (time delegou)');
+        try {
+          db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'ia_tina_assume_em_atendimento', ?)`)
+            .run(contact.id, JSON.stringify({ ghlContactId }));
+        } catch {}
+        // NÃO retorna — segue pro fluxo normal de resposta/qualificação.
+      } else {
+        logger.info({ ghlContactId, contactId: contact.id }, 'lead já estava em atendimento humano (conversa pré-existente), Tina não assume');
+        // Log auditável: pra você acompanhar quantas vezes o filtro atuou e
+        // checar se não está bloqueando lead que devia atender (resumo-dia).
+        try {
+          db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_em_atendimento', ?)`)
+            .run(contact.id, JSON.stringify({ ghlContactId }));
+        } catch {}
+        handleSDRReply(contact.id, null);
+        return;
+      }
     }
   }
 

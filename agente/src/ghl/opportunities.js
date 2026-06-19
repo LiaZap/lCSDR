@@ -136,6 +136,23 @@ export async function contactOppOutsideTinaLane(contact) {
   }
 }
 
+// Lead tem opp ABERTA na coluna IA Tina? É o sinal POSITIVO de que o TIME colocou
+// o lead na raia da Tina pra ela trabalhar → ela DEVE assumir e qualificar, mesmo
+// que a conversa tenha histórico de humano (em_atendimento) ou reentrada: a
+// colocação na coluna É a autorização. Falha FECHADO (erro → false → não força;
+// os gates normais decidem). Cobre multi-opp (basta UMA aberta na IA Tina).
+export async function contactInIaTinaLane(contact) {
+  const { stageIaTina } = resolvePipeline();
+  if (!stageIaTina || !contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return false;
+  try {
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
+    const ops = r?.opportunities || (Array.isArray(r) ? r : []);
+    return ops.some(o => String(o.status || 'open').toLowerCase() === 'open' && o.pipelineStageId === stageIaTina);
+  } catch {
+    return false;
+  }
+}
+
 // Reivindica o lead pra Tina (re-engajamento ATIVO): move a opp pra IA Tina (ou
 // cria). NÃO reabre won/lost. Uso INTENCIONAL (script de re-engajamento) — aí o
 // lead entra na raia da Tina e ela passa a tratar as respostas dele.
