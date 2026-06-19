@@ -15,26 +15,30 @@ const SEND = process.argv.includes('--send');
 const AUTO = new Set(['workflow', 'campaign', 'bulk_actions', 'bulk', 'automation']);
 
 const WINDOW_DAYS = Number(process.env.MOVER_HUMAN_DAYS || 7);
-// Consultor envolvido? QUALQUER outbound da conversa (não só o último) de um SDR
-// conhecido, nos últimos N dias. Pega o caso de a Tina ter mandado a última msg
-// mas um humano ter falado com o lead antes/depois (co-atendimento).
-async function humanTouched(g) {
+const isSdr = uid => !!uid && !!db.prepare('SELECT 1 FROM sdr_users WHERE ghl_user_id = ?').get(uid);
+// Decide se PULA o lead (consultor envolvido). Dois sinais, numa busca só:
+//  - aposTina: um SDR conhecido respondeu DEPOIS da última msg da Tina (assumiu);
+//  - recente:  algum SDR conhecido falou nos últimos N dias (co-atendimento).
+// Tina = outbound com corpo de texto e SEM userId de SDR (ela manda com uid nulo).
+async function consultorEnvolvido(g) {
   try {
     const cv = await GHL.searchConversations(g);
     const conv = cv?.conversations?.[0] || cv?.[0];
-    if (!conv?.id) return false;
+    if (!conv?.id) return { skip: false };
     const m = await GHL.getMessages(conv.id, { limit: 30 });
     const ms = m?.messages?.messages || m?.messages || m || [];
     const limite = Date.now() - WINDOW_DAYS * 864e5;
-    return ms.some(x => {
-      if ((x.direction || '').toLowerCase() !== 'outbound') return false;
-      const uid = x.userId || x.user_id;
-      if (!uid || AUTO.has(String(x.source || '').toLowerCase())) return false;
-      if (!db.prepare('SELECT 1 FROM sdr_users WHERE ghl_user_id = ?').get(uid)) return false; // não é SDR conhecido
+    let tinaMax = 0, sdrMax = 0, recente = false;
+    for (const x of ms) {
+      if ((x.direction || '').toLowerCase() !== 'outbound') continue;
+      if (AUTO.has(String(x.source || '').toLowerCase())) continue; // ignora workflow/automação
       const ts = new Date(x.dateAdded || x.createdAt || 0).getTime();
-      return ts > limite; // SDR falou recentemente
-    });
-  } catch { return false; }
+      if (isSdr(x.userId || x.user_id)) { if (ts > sdrMax) sdrMax = ts; if (ts > limite) recente = true; }
+      else if (String(x.body || '').trim()) { if (ts > tinaMax) tinaMax = ts; } // Tina
+    }
+    const aposTina = sdrMax > 0 && sdrMax >= tinaMax; // consultor respondeu depois (ou junto) da Tina
+    return { skip: aposTina || recente, aposTina, recente };
+  } catch { return { skip: false }; }
 }
 
 const rows = db.prepare(`
@@ -49,7 +53,8 @@ const rows = db.prepare(`
 console.log(`\n${rows.length} leads que a Tina está atendendo (ativos). Avaliando...\n`);
 let movidos = 0, pulHuman = 0;
 for (const r of rows) {
-  if (await humanTouched(r.g)) { pulHuman++; console.log(`  ⏭️  ${(r.name || '?').slice(0, 22).padEnd(22)} | consultor falou (${WINDOW_DAYS}d), pula`); continue; }
+  const ce = await consultorEnvolvido(r.g);
+  if (ce.skip) { pulHuman++; console.log(`  ⏭️  ${(r.name || '?').slice(0, 22).padEnd(22)} | pula (${ce.aposTina ? 'consultor após Tina' : 'consultor recente'})`); continue; }
   if (SEND) {
     const id = await claimToIaTina({ id: r.id, ghl_contact_id: r.g, name: r.name }).catch(() => null);
     console.log(`  ✅ ${(r.name || '?').slice(0, 22).padEnd(22)} | movido p/ IA Tina${id ? '' : ' (sem efeito)'}`);
