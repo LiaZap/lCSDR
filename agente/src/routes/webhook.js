@@ -424,11 +424,17 @@ async function handleOpportunityStage(event) {
   let ghlContactId = event.contact?.id || event.opportunity?.contactId || event.contact_id || null;
   if (!ghlContactId && event.contactId && event.contactId !== oppId) ghlContactId = event.contactId;
 
-  // Só age quando foi pra coluna IA Tina do pipeline da Tina.
-  if (!stageId || stageId !== stageIaTina) return;
-  if (oppPipelineId && pipelineId && oppPipelineId !== pipelineId) return;
+  // O tipo dedicado 'IaTinaAssumir' vem de um Workflow do GHL JÁ FILTRADO pra a
+  // coluna IA Tina → confia no filtro do GHL e DISPENSA o pipelineStageId (que o
+  // GHL nem sempre expõe como merge field). Pros eventos NATIVOS de stage, exige
+  // que tenha ido pra coluna IA Tina do pipeline da Tina.
+  const trusted = String(event.type || '') === 'IaTinaAssumir';
+  if (!trusted) {
+    if (!stageId || stageId !== stageIaTina) return;
+    if (oppPipelineId && pipelineId && oppPipelineId !== pipelineId) return;
+  }
   if (!ghlContactId) {
-    logger.warn({ oppId, kind: event.type }, 'evento de stage IA Tina sem contactId resolvível — ignorando');
+    logger.warn({ oppId, kind: event.type }, 'evento IA Tina sem contactId resolvível — ignorando');
     return;
   }
 
