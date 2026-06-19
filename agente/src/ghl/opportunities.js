@@ -12,38 +12,20 @@ import { logger } from '../utils/logger.js';
 
 let PIPELINE_CACHE = null;
 
-async function resolvePipeline() {
+// Defaults conhecidos (Pré-Vendas LCA). Evita o auto-detect que pegava
+// "Reentrada" (stages[0]) errado. Env sobrescreve.
+const DEFAULT_PIPELINE_ID = 'MfDNcFdH03j0ZBuwJDYM';
+const DEFAULT_STAGE_QUALIFIED = '0c040fa3-3ed5-449f-ab07-c7b3fb40f97c'; // Aguardando Atendimento
+const DEFAULT_STAGE_IA_TINA = '74164182-d3b0-447b-a761-3bdcd6d47eac';    // IA Tina
+
+function resolvePipeline() {
   if (PIPELINE_CACHE) return PIPELINE_CACHE;
-
-  const envPid = process.env.GHL_PIPELINE_ID;
-  const envStageQ = process.env.GHL_PIPELINE_STAGE_QUALIFIED;
-  if (envPid && envStageQ) {
-    PIPELINE_CACHE = { pipelineId: envPid, stageQualified: envStageQ };
-    return PIPELINE_CACHE;
-  }
-
-  try {
-    const r = await GHL.listPipelines();
-    const pipes = r.pipelines || r || [];
-    if (!pipes.length) {
-      logger.warn('nenhum pipeline no GHL — oportunidade não será criada');
-      PIPELINE_CACHE = { pipelineId: null, stageQualified: null };
-      return PIPELINE_CACHE;
-    }
-    const pipe = pipes[0];
-    const stage = (pipe.stages || []).find(s => /qualif/i.test(s.name))
-                || (pipe.stages || [])[0];
-    PIPELINE_CACHE = {
-      pipelineId: pipe.id,
-      stageQualified: stage?.id || null,
-    };
-    logger.info({ cache: PIPELINE_CACHE }, 'pipeline detectado');
-    return PIPELINE_CACHE;
-  } catch (err) {
-    logger.error({ err: err.message }, 'falha ao resolver pipeline');
-    PIPELINE_CACHE = { pipelineId: null, stageQualified: null };
-    return PIPELINE_CACHE;
-  }
+  PIPELINE_CACHE = {
+    pipelineId: process.env.GHL_PIPELINE_ID || DEFAULT_PIPELINE_ID,
+    stageQualified: process.env.GHL_PIPELINE_STAGE_QUALIFIED || DEFAULT_STAGE_QUALIFIED,
+    stageIaTina: process.env.GHL_PIPELINE_STAGE_IA_TINA || DEFAULT_STAGE_IA_TINA,
+  };
+  return PIPELINE_CACHE;
 }
 
 // Cria oportunidade no pipeline "Qualificado" quando a Iara qualifica.
@@ -114,6 +96,35 @@ export async function contactInBlockedOppStage(contact) {
     ) || null;
   } catch (err) {
     logger.warn({ err: err.message, contactId: contact.id }, 'falha checando stage de oportunidade (reentrada); segue');
+    return null;
+  }
+}
+
+// Coloca o lead na coluna "IA Tina" enquanto a Tina trabalha (antes de
+// qualificar): dá visibilidade ao time e evita o lead cair na reentrada durante
+// o atendimento. Conservador: NÃO mexe se já está numa stage do time
+// (bloqueada), nem se já foi qualificado (Aguardando Atendimento), nem se já
+// está na IA Tina. Cria a oportunidade se não existir. Falha aberto.
+export async function moveLeadToIaTina(contact) {
+  const { pipelineId, stageQualified, stageIaTina } = resolvePipeline();
+  if (!pipelineId || !stageIaTina || !contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return null;
+  try {
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id).catch(() => null);
+    const opp = r?.opportunities?.[0] || r?.[0];
+    if (opp) {
+      const cur = opp.pipelineStageId;
+      if (cur === stageIaTina || cur === stageQualified) return opp.id; // já na IA Tina ou já handoff
+      if (blockedOppStages().includes(cur)) return opp.id;              // stage do time → não rouba
+      await GHL.updateOpportunity(opp.id, { pipelineId, pipelineStageId: stageIaTina, status: 'open' });
+      return opp.id;
+    }
+    const created = await GHL.createOpportunity({
+      pipelineId, stageId: stageIaTina, contactId: contact.ghl_contact_id,
+      name: `${contact.name || 'Lead'} · IA Tina`,
+    });
+    return created?.opportunity?.id || created?.id || null;
+  } catch (err) {
+    logger.warn({ err: err.message, contactId: contact.id }, 'falha movendo lead p/ IA Tina; segue');
     return null;
   }
 }

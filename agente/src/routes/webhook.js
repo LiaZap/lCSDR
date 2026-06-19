@@ -19,7 +19,7 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { contactInBlockedOppStage } from '../ghl/opportunities.js';
+import { contactInBlockedOppStage, moveLeadToIaTina } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
@@ -673,6 +673,9 @@ async function handleInbound(event) {
       await markDisqualified(fresh, result);
 
     } else {
+      // Tina ainda qualificando: coloca o lead na coluna "IA Tina" (visibilidade
+      // pro time + não cai na reentrada enquanto ela atende) e agenda follow-up.
+      await moveLeadToIaTina(fresh).catch(() => {});
       scheduleFollowup(fresh.id, 'silencio_lead');
     }
   });
