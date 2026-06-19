@@ -14,22 +14,26 @@ import { claimToIaTina } from '../src/ghl/opportunities.js';
 const SEND = process.argv.includes('--send');
 const AUTO = new Set(['workflow', 'campaign', 'bulk_actions', 'bulk', 'automation']);
 
-// Consultor ativo? último outbound da conversa é de um SDR conhecido, recente (3 dias).
-async function humanActive(g) {
+const WINDOW_DAYS = Number(process.env.MOVER_HUMAN_DAYS || 7);
+// Consultor envolvido? QUALQUER outbound da conversa (não só o último) de um SDR
+// conhecido, nos últimos N dias. Pega o caso de a Tina ter mandado a última msg
+// mas um humano ter falado com o lead antes/depois (co-atendimento).
+async function humanTouched(g) {
   try {
     const cv = await GHL.searchConversations(g);
     const conv = cv?.conversations?.[0] || cv?.[0];
     if (!conv?.id) return false;
-    const m = await GHL.getMessages(conv.id, { limit: 15 });
-    let ms = m?.messages?.messages || m?.messages || m || [];
-    ms = [...ms].sort((a, b) => new Date(b.dateAdded || b.createdAt || 0) - new Date(a.dateAdded || a.createdAt || 0));
-    const lastOut = ms.find(x => (x.direction || '').toLowerCase() === 'outbound');
-    if (!lastOut) return false;
-    const uid = lastOut.userId || lastOut.user_id;
-    if (!uid || AUTO.has(String(lastOut.source || '').toLowerCase())) return false;
-    if (!db.prepare('SELECT 1 FROM sdr_users WHERE ghl_user_id = ?').get(uid)) return false; // não é SDR conhecido
-    const ts = new Date(lastOut.dateAdded || lastOut.createdAt || 0).getTime();
-    return ts > Date.now() - 3 * 864e5; // recente
+    const m = await GHL.getMessages(conv.id, { limit: 30 });
+    const ms = m?.messages?.messages || m?.messages || m || [];
+    const limite = Date.now() - WINDOW_DAYS * 864e5;
+    return ms.some(x => {
+      if ((x.direction || '').toLowerCase() !== 'outbound') return false;
+      const uid = x.userId || x.user_id;
+      if (!uid || AUTO.has(String(x.source || '').toLowerCase())) return false;
+      if (!db.prepare('SELECT 1 FROM sdr_users WHERE ghl_user_id = ?').get(uid)) return false; // não é SDR conhecido
+      const ts = new Date(x.dateAdded || x.createdAt || 0).getTime();
+      return ts > limite; // SDR falou recentemente
+    });
   } catch { return false; }
 }
 
@@ -45,7 +49,7 @@ const rows = db.prepare(`
 console.log(`\n${rows.length} leads que a Tina está atendendo (ativos). Avaliando...\n`);
 let movidos = 0, pulHuman = 0;
 for (const r of rows) {
-  if (await humanActive(r.g)) { pulHuman++; console.log(`  ⏭️  ${(r.name || '?').slice(0, 22).padEnd(22)} | consultor ativo, pula`); continue; }
+  if (await humanTouched(r.g)) { pulHuman++; console.log(`  ⏭️  ${(r.name || '?').slice(0, 22).padEnd(22)} | consultor falou (${WINDOW_DAYS}d), pula`); continue; }
   if (SEND) {
     const id = await claimToIaTina({ id: r.id, ghl_contact_id: r.g, name: r.name }).catch(() => null);
     console.log(`  ✅ ${(r.name || '?').slice(0, 22).padEnd(22)} | movido p/ IA Tina${id ? '' : ' (sem efeito)'}`);
