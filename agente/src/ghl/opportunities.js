@@ -129,6 +129,9 @@ export async function claimToIaTina(contact) {
     if (opp) {
       const status = String(opp.status || 'open').toLowerCase();
       if (status === 'won' || status === 'lost' || opp.pipelineStageId === stageIaTina) return opp.id;
+      // Só reorganiza DENTRO do pipeline da Tina (Pré-Vendas LCA). Não puxa opp
+      // de OUTRO pipeline (Closers/Editorial) pra não bagunçar o board deles.
+      if (opp.pipelineId && opp.pipelineId !== pipelineId) return opp.id;
       await GHL.updateOpportunity(opp.id, { pipelineId, pipelineStageId: stageIaTina, status: 'open' });
       return opp.id;
     }

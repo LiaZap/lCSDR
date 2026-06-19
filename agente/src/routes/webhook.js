@@ -19,7 +19,7 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { contactOppOutsideTinaLane, moveLeadToIaTina } from '../ghl/opportunities.js';
+import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
@@ -674,10 +674,15 @@ async function handleInbound(event) {
       await markDisqualified(fresh, result);
 
     } else {
-      // Tina ainda qualificando: se JÁ identificou o funil (lead real, não só um
-      // "oi"), coloca na coluna "IA Tina" pra dar visibilidade ao time. Sem funil
-      // ainda, não cria oportunidade à toa (evita poluir o board com curioso).
-      if (result.funnel || fresh.funnel) await moveLeadToIaTina(fresh).catch(() => {});
+      // Tina ainda qualificando: se JÁ identificou o funil, coloca o lead na
+      // coluna "IA Tina" (raia dela). Com a detecção de humano LIGADA, a Tina só
+      // chega aqui em leads que NENHUM consultor está atendendo → seguro MOVER a
+      // opp pra IA Tina (claimToIaTina, dentro do pipeline dela). Sem a detecção,
+      // só CRIA pra lead novo (moveLeadToIaTina) pra não roubar lead do time.
+      if (result.funnel || fresh.funnel) {
+        if (AUTO_HUMAN_DETECTION) await claimToIaTina(fresh).catch(() => {});
+        else await moveLeadToIaTina(fresh).catch(() => {});
+      }
       scheduleFollowup(fresh.id, 'silencio_lead');
     }
   });
