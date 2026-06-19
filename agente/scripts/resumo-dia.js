@@ -31,6 +31,17 @@ const leadsHoje = db.prepare(`
 `).get()?.c || 0;
 console.log('👥 Leads que conversaram hoje: ' + leadsHoje);
 
+// Leads que a Tina RESPONDEU hoje (saída author='ia') + total de mensagens dela
+const tinaFalou = db.prepare(`
+  SELECT COUNT(DISTINCT contact_id) c FROM messages
+  WHERE author='ia' AND date(created_at)=date('now')
+`).get()?.c || 0;
+const msgsTina = db.prepare(`
+  SELECT COUNT(*) c FROM messages
+  WHERE author='ia' AND date(created_at)=date('now')
+`).get()?.c || 0;
+console.log('💬 Leads que a Tina respondeu hoje: ' + tinaFalou + '  (' + msgsTina + ' mensagens)');
+
 // Stage atual
 const stages = db.prepare(`SELECT stage, COUNT(*) c FROM contacts WHERE date(updated_at)=date('now') GROUP BY stage ORDER BY c DESC`).all();
 if (stages.length) {
