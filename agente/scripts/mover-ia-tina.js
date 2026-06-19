@@ -46,7 +46,10 @@ const rows = db.prepare(`
   FROM contacts
   WHERE stage IN ('pre_qualificando','qualificando')
     AND ai_paused = 0
-    AND ghl_contact_id IS NOT NULL AND ghl_contact_id NOT LIKE 'test%'
+    AND ghl_contact_id IS NOT NULL
+    AND ghl_contact_id NOT LIKE 'test%'
+    AND ghl_contact_id NOT LIKE 'demo%'
+    AND ghl_contact_id NOT LIKE '%-%'   -- ids reais do GHL não têm hífen (descarta seed/demo)
   ORDER BY updated_at DESC
 `).all();
 
