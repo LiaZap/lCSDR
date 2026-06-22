@@ -168,6 +168,7 @@ export async function generateTinaReply({ contact, incomingText, extraContext = 
       funnel: null,
       stage: 'pre_qualificando',
       handoff: true,
+      llm_failed: true,
       handoff_reason: `IA indisponível (${primary}${secondary ? ` + ${secondary}` : ''}): ${err.message}`,
       qualification_score: 0,
       qualification_notes: '⚠ Ambos LLMs falharam — encaminhando ao humano',

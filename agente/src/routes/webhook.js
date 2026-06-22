@@ -516,6 +516,10 @@ export async function handleOpportunityStage(event) {
       incomingText: CONTINUATION_TRIGGER,
       extraContext: CONTINUATION_CONTEXT,
     });
+    if (result.llm_failed) {
+      logger.warn({ contactId: fresh.id }, 'continuidade IA Tina: IA indisponível (LLM caiu), não envia');
+      return { ok: false, reason: 'ia_indisponivel' };
+    }
     const items = result.split && result.split.length ? result.split : [result.reply];
     const temTexto = items.some(i => (typeof i === 'string' ? i : i?.text || '').trim());
     if (!temTexto) {
@@ -842,6 +846,20 @@ async function handleInbound(event) {
 
     // 6) Gera resposta da Tina
     const result = await generateTinaReply({ contact: fresh, incomingText: content, extraContext });
+
+    // IA INDISPONÍVEL (LLM sem crédito/caiu): NÃO manda o fallback genérico e NÃO
+    // faz handoff — senão o lead recebe "deixa eu te conectar..." e uma automação
+    // do GHL empurra pra Reentrada. Só registra e reagenda; quando a IA voltar, a
+    // Tina retoma no próximo contato/follow-up.
+    if (result.llm_failed) {
+      logger.error({ contactId: fresh.id, reason: result.handoff_reason }, 'IA indisponível (LLM caiu) — não responde nem move o lead');
+      try {
+        db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'ia_indisponivel', ?)`)
+          .run(fresh.id, JSON.stringify({ reason: result.handoff_reason || null }));
+      } catch {}
+      scheduleFollowup(fresh.id, 'retomar_script');
+      return;
+    }
 
     // 7) AGENDAMENTO, fase 3: o lead confirmou um horário → marca no GHL.
     let booked = null;

@@ -292,6 +292,7 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
       funnel: null,
       stage: 'pre_qualificando',
       handoff: true,
+      llm_failed: true,
       handoff_reason: 'IA OpenAI falhou em gerar resposta válida',
       qualification_score: 0,
       qualification_notes: '⚠ JSON inválido OpenAI Responses',

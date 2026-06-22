@@ -164,6 +164,7 @@ Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
       funnel: null,
       stage: 'pre_qualificando',
       handoff: true,
+      llm_failed: true,
       handoff_reason: 'IA falhou em gerar resposta válida — encaminhando ao humano',
       qualification_score: 0,
       qualification_notes: '⚠ Tina falhou em gerar resposta válida',
