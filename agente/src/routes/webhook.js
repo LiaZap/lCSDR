@@ -1036,12 +1036,19 @@ async function handleInbound(event) {
       // chega aqui em leads que NENHUM consultor está atendendo → seguro MOVER a
       // opp pra IA Tina (claimToIaTina, dentro do pipeline dela). Sem a detecção,
       // só CRIA pra lead novo (moveLeadToIaTina) pra não roubar lead do time.
-      // Move pra coluna IA Tina. No modo "atende todos menos Reentrada", move já no
-      // 1º contato (NÃO espera classificar o funil) — é o "puxar pra IA Tina" que o
-      // time pediu. O guard de Reentrada/opp-fechada no claimToIaTina protege.
+      // Move pra coluna IA Tina + marca a tag dela. No modo "atende todos menos
+      // Reentrada", move já no 1º contato (NÃO espera classificar o funil) — é o
+      // "puxar pra IA Tina" que o time pediu. O guard de Reentrada/opp-fechada no
+      // claimToIaTina protege.
       if (ATTEND_EXCEPT_REENTRADA || result.funnel || fresh.funnel) {
         if (ATTEND_EXCEPT_REENTRADA || AUTO_HUMAN_DETECTION) await claimToIaTina(fresh).catch(() => {});
         else await moveLeadToIaTina(fresh).catch(() => {});
+        // Tagueia o lead como "da Tina" (tina-liberada) ao assumir — marcador pra
+        // ele ser reconhecido como dela nas próximas mensagens. Idempotente: só a
+        // 1ª vez (nas próximas, `tags` já inclui a tag e pula).
+        if (ATTEND_EXCEPT_REENTRADA && REQUIRED_TAG_ENABLED && !tags.includes(REQUIRED_TAG)) {
+          await GHL.addTag(ghlContactId, REQUIRED_TAG).catch(() => {});
+        }
       }
       scheduleFollowup(fresh.id, 'silencio_lead');
     }
