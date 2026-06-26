@@ -199,12 +199,13 @@ const ATTENDANCE_DAYS = Number(process.env.SKIP_ATTENDANCE_DAYS || 30);
 // MODO "atende TODOS menos Reentrada" (leads de anúncio caem no Funil Orgânico e
 // a Tina precisa atender + mover pra coluna dela). Quando ON: ignora o whitelist
 // da tag (atende sem `tina-liberada`), PULA quem tem opp aberta em Reentrada (time
-// re-trabalhando), e MOVE o lead atendido pra IA Tina (claimToIaTina). Mantém o
-// bloqueio por origem (BLOCK_TAGS), a pausa, e o gate "em atendimento".
-// ⚠️ Como atende leads SEM tag, a proteção contra colisão com humano em OUTRO funil
-// (Closers/Editorial/Proposta) fica SÓ no "em atendimento" (1º contato, 30d). Pra
-// blindar de verdade, ligue JUNTO `AUTO_HUMAN_DETECTION_ENABLED=true` (pausa quando
-// um SDR conhecido respondeu recente, em tempo real).
+// re-trabalhando), e MOVE o lead atendido pra IA Tina (claimToIaTina). Também
+// IGNORA o gate "em atendimento" de 30 dias — lead de anúncio VOLTA com mensagem
+// antiga de humano (Lilian/Equipe LC) e era barrado à toa. Mantém o bloqueio por
+// origem (BLOCK_TAGS) e a pausa (tina-pausada).
+// ⚠️ Como solta o "em atendimento", a proteção contra colisão com humano fica na
+// DETECÇÃO EM TEMPO REAL — ligue JUNTO `AUTO_HUMAN_DETECTION_ENABLED=true` (pausa
+// quando um SDR conhecido respondeu recente).
 const ATTEND_EXCEPT_REENTRADA = process.env.TINA_ATTEND_EXCEPT_REENTRADA === 'true';
 
 // Sources que são AUTOMAÇÃO (não atendimento humano), mesmo tendo userId — o
@@ -663,7 +664,7 @@ async function handleInbound(event) {
   // reentrada no GHL). Só no PRIMEIRO contato da Tina (ela nunca respondeu este
   // lead): se a conversa do GHL já tem saída de um humano, o lead JÁ estava em
   // atendimento → a Tina não assume. Não atrapalha conversas que ela já toca.
-  if (SKIP_IN_ATTENDANCE && !contact.last_outbound_at) {
+  if (SKIP_IN_ATTENDANCE && !ATTEND_EXCEPT_REENTRADA && !contact.last_outbound_at) {
     if (await conversationAlreadyInAttendance(ghlContactId)) {
       // EXCEÇÃO: se o TIME colocou o lead na coluna IA Tina, isso É a autorização
       // pra Tina assumir — ela responde e qualifica mesmo com histórico de humano
