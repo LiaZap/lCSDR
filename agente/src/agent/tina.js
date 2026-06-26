@@ -102,10 +102,13 @@ function finalize(raw, contact) {
 // Se for 4xx (auth, bad request, etc), NÃO faz fallback — é bug nosso.
 function isRetryableLlmError(err) {
   if (!err) return false;
-  const status = err.status || err.statusCode;
-  if (status >= 500) return true;
-  if (status === 408 || status === 429) return true;
-  if (/timeout|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i.test(err.message || '')) return true;
+  const status = err.status || err.statusCode || err.code;
+  if (typeof status === 'number' && (status >= 500 || status === 408 || status === 429)) return true;
+  // Muitos SDKs (Gemini, p.ex.) NÃO colocam o status em err.status — vem só na
+  // mensagem. Sem cobrir isso, um 429 de COTA do primário não era reconhecido
+  // como retryable e o fallback de provider (OpenAI/Anthropic) NUNCA disparava →
+  // a Tina ficava muda. Cobre cota/rate/5xx por mensagem também.
+  if (/timeout|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|quota|RESOURCE_EXHAUSTED|rate.?limit|overloaded|insufficient_quota|too many requests|service unavailable|exceeded your current quota/i.test(err.message || '')) return true;
   return false;
 }
 
