@@ -13,11 +13,39 @@
 //   node scripts/responder-pendentes.js --send 48 → janela de 48h (default 24)
 import 'dotenv/config';
 import { db } from '../src/db/index.js';
+import { GHL } from '../src/ghl/client.js';
 import { handleOpportunityStage } from '../src/routes/webhook.js';
 
 const SEND = process.argv.includes('--send');
 const HOURS = Number(process.argv.find(a => /^\d+$/.test(a)) || process.env.PENDENTES_HORAS || 24);
 const DELAY_MS = Number(process.env.PENDENTES_DELAY_MS || 5000);
+// Janela pra considerar "humano está atendendo": se um SDR respondeu na conversa
+// do GHL nas últimas N horas, NÃO responde (anti-colisão).
+const HUMAN_HORAS = Number(process.env.PENDENTES_HUMAN_HORAS || 24);
+const AUTO = new Set(['workflow', 'campaign', 'bulk_actions', 'bulk', 'automation']);
+
+// Um HUMANO (SDR) respondeu recente na conversa do GHL? Olha direto no GHL —
+// cobre o caso do webhook OutboundMessage NÃO estar configurado (aí a resposta
+// do time não aparece no banco local). Humano = outbound com userId e source não
+// automação. Falha FECHADO (erro → true → pula, pra nunca atropelar humano).
+async function humanRespondeu(contactId) {
+  try {
+    const cv = await GHL.searchConversations(contactId);
+    const conv = cv?.conversations?.[0] || cv?.[0];
+    if (!conv?.id) return false;
+    const m = await GHL.getMessages(conv.id, { limit: 20 });
+    const ms = m?.messages?.messages || m?.messages || m || [];
+    const limite = Date.now() - HUMAN_HORAS * 3600 * 1000;
+    return ms.some(x => {
+      if (String(x.direction || '').toLowerCase() !== 'outbound') return false;
+      const uid = x.userId || x.user_id || x.sentBy?.id;
+      if (!uid) return false;                                  // Tina via API = sem userId
+      if (AUTO.has(String(x.source || '').toLowerCase())) return false; // workflow/automação
+      const ts = new Date(x.dateAdded || x.createdAt || 0).getTime();
+      return ts >= limite;                                     // humano recente
+    });
+  } catch { return true; } // na dúvida, PULA (não colide com humano)
+}
 
 // Leads cujo ÚLTIMO movimento foi uma mensagem do LEAD (inbound), dentro de N
 // horas, e a Tina não respondeu depois (last_inbound_at > last_outbound_at).
@@ -39,8 +67,16 @@ console.log(`\n${rows.length} lead(s) PENDENTE(S) — mandaram msg nas últimas 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const t0 = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-let resp = 0;
+let resp = 0, pulHuman = 0;
 for (const r of rows) {
+  // ANTI-COLISÃO: pula se um humano (SDR) respondeu recente na conversa do GHL —
+  // cobre o caso do time ter respondido direto no GHL (mesmo sem o webhook
+  // OutboundMessage, que atualizaria o banco local).
+  if (await humanRespondeu(r.g)) {
+    console.log(`  ⏭️  ${(r.name || r.g).slice(0, 26).padEnd(26)} | pula (humano respondeu)`);
+    pulHuman++;
+    continue;
+  }
   if (SEND) {
     try {
       // Mesmo motor da continuidade: responde a última msg + move pra IA Tina + tagueia.
@@ -52,12 +88,12 @@ for (const r of rows) {
       console.log(`  ❌ ${(r.name || r.g).slice(0, 26).padEnd(26)} | erro: ${e.message}`);
     }
   } else {
-    console.log(`  • (dry) ${(r.name || r.g).slice(0, 26).padEnd(26)} | último inbound: ${r.last_inbound_at}`);
+    console.log(`  • (dry) ${(r.name || r.g).slice(0, 26).padEnd(26)} | iria responder (último inbound: ${r.last_inbound_at})`);
   }
 }
 
 console.log(`\n──────── resumo ────────`);
-console.log(`Pendentes: ${rows.length}` + (SEND ? ` | respondidos: ${resp}` : ''));
+console.log(`Pendentes: ${rows.length} | pulados (humano respondeu): ${pulHuman}` + (SEND ? ` | respondidos: ${resp}` : ` | iriam responder: ${rows.length - pulHuman}`));
 if (SEND) {
   const ev = db.prepare(
     `SELECT kind, COUNT(*) c FROM events_log WHERE created_at >= ? AND kind IN ('ia_tina_continuation','ia_tina_fora_janela') GROUP BY kind ORDER BY c DESC`
