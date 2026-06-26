@@ -590,6 +590,10 @@ export async function handleOpportunityStage(event) {
         await markQualifiedAndHandoff(fresh, result, { pause: false }).catch(() => {});
       } else if (result.stage === 'desqualificado' || result.end_conversation) {
         await markDisqualified(fresh, result).catch(() => {});
+      } else {
+        // Ainda qualificando → PUXA pra coluna IA Tina (raia dela). No-op se já
+        // estiver lá (caso do webhook); move o pendente do Funil Orgânico pra IA Tina.
+        await claimToIaTina(fresh).catch(() => {});
       }
     } catch (err) {
       logger.error({ err: err.message, contactId: fresh.id }, 'continuidade IA Tina: falha no roteamento pós-retomada');
