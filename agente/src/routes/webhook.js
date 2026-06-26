@@ -19,7 +19,7 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane } from '../ghl/opportunities.js';
+import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane, contactOppInReentrada } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff, notifyIaTinaForaJanela } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
@@ -195,6 +195,17 @@ const SKIP_IN_ATTENDANCE = process.env.SKIP_LEADS_IN_ATTENDANCE !== 'false';
 // Evita bloquear lead FRIO antigo (humano falou há meses, lead sumiu e voltou —
 // é oportunidade nova pra Tina). Configurável; 0/negativo = sem janela (qualquer idade).
 const ATTENDANCE_DAYS = Number(process.env.SKIP_ATTENDANCE_DAYS || 30);
+
+// MODO "atende TODOS menos Reentrada" (leads de anúncio caem no Funil Orgânico e
+// a Tina precisa atender + mover pra coluna dela). Quando ON: ignora o whitelist
+// da tag (atende sem `tina-liberada`), PULA quem tem opp aberta em Reentrada (time
+// re-trabalhando), e MOVE o lead atendido pra IA Tina (claimToIaTina). Mantém o
+// bloqueio por origem (BLOCK_TAGS), a pausa, e o gate "em atendimento".
+// ⚠️ Como atende leads SEM tag, a proteção contra colisão com humano em OUTRO funil
+// (Closers/Editorial/Proposta) fica SÓ no "em atendimento" (1º contato, 30d). Pra
+// blindar de verdade, ligue JUNTO `AUTO_HUMAN_DETECTION_ENABLED=true` (pausa quando
+// um SDR conhecido respondeu recente, em tempo real).
+const ATTEND_EXCEPT_REENTRADA = process.env.TINA_ATTEND_EXCEPT_REENTRADA === 'true';
 
 // Sources que são AUTOMAÇÃO (não atendimento humano), mesmo tendo userId — o
 // GHL carimba o dono do workflow/campanha no userId. Confirmado em prod: msg
@@ -609,7 +620,7 @@ async function handleInbound(event) {
 
   // 1.4) WHITELIST: durante teste/staging, Tina só atende quem TEM a tag tina-liberada.
   // Sem essa verificação, qualquer lead importado no GHL recebe resposta automática.
-  if (REQUIRED_TAG_ENABLED && !tags.includes(REQUIRED_TAG)) {
+  if (REQUIRED_TAG_ENABLED && !ATTEND_EXCEPT_REENTRADA && !tags.includes(REQUIRED_TAG)) {
     logger.info({ ghlContactId, required: REQUIRED_TAG }, 'contato sem tag de liberação, Tina não responde');
     return;
   }
@@ -631,6 +642,18 @@ async function handleInbound(event) {
   }
 
   const contact = upsertContactFromGHL(ghlContact);
+
+  // 1.5b) MODO "atende todos menos Reentrada": pula lead com opp ABERTA numa stage
+  // de Reentrada (time re-trabalhando). Os de anúncio (Funil Orgânico/Follow Up)
+  // passam normal e a Tina move pra coluna dela depois.
+  if (ATTEND_EXCEPT_REENTRADA && await contactOppInReentrada(contact)) {
+    logger.info({ ghlContactId, contactId: contact.id }, 'lead em Reentrada (time re-trabalhando), Tina não assume');
+    try {
+      db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_reentrada', ?)`)
+        .run(contact.id, JSON.stringify({ ghlContactId }));
+    } catch {}
+    return;
+  }
 
   // 1.55) FILTRO LEAD NOVO vs. EM ATENDIMENTO (Gabriel não consegue filtrar
   // reentrada no GHL). Só no PRIMEIRO contato da Tina (ela nunca respondeu este
@@ -1013,8 +1036,11 @@ async function handleInbound(event) {
       // chega aqui em leads que NENHUM consultor está atendendo → seguro MOVER a
       // opp pra IA Tina (claimToIaTina, dentro do pipeline dela). Sem a detecção,
       // só CRIA pra lead novo (moveLeadToIaTina) pra não roubar lead do time.
-      if (result.funnel || fresh.funnel) {
-        if (AUTO_HUMAN_DETECTION) await claimToIaTina(fresh).catch(() => {});
+      // Move pra coluna IA Tina. No modo "atende todos menos Reentrada", move já no
+      // 1º contato (NÃO espera classificar o funil) — é o "puxar pra IA Tina" que o
+      // time pediu. O guard de Reentrada/opp-fechada no claimToIaTina protege.
+      if (ATTEND_EXCEPT_REENTRADA || result.funnel || fresh.funnel) {
+        if (ATTEND_EXCEPT_REENTRADA || AUTO_HUMAN_DETECTION) await claimToIaTina(fresh).catch(() => {});
         else await moveLeadToIaTina(fresh).catch(() => {});
       }
       scheduleFollowup(fresh.id, 'silencio_lead');

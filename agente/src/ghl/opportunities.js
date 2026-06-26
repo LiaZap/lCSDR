@@ -153,6 +153,22 @@ export async function contactInIaTinaLane(contact) {
   }
 }
 
+// Lead tem opp ABERTA numa stage de REENTRADA (o time está re-trabalhando ele)?
+// Usado pelo modo "atende todos menos Reentrada" pra a Tina NÃO assumir esses.
+// Falha ABERTO (erro → false → atende; não bloqueia atendimento por falha de API).
+export async function contactOppInReentrada(contact) {
+  if (!contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return false;
+  const blocked = new Set(blockedOppStages());
+  if (!blocked.size) return false;
+  try {
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
+    const ops = r?.opportunities || (Array.isArray(r) ? r : []);
+    return ops.some(o => String(o.status || 'open').toLowerCase() === 'open' && blocked.has(o.pipelineStageId));
+  } catch {
+    return false;
+  }
+}
+
 // Reivindica o lead pra Tina (re-engajamento ATIVO): move a opp pra IA Tina (ou
 // cria). NÃO reabre won/lost. Uso INTENCIONAL (script de re-engajamento) — aí o
 // lead entra na raia da Tina e ela passa a tratar as respostas dele.
@@ -166,6 +182,8 @@ export async function claimToIaTina(contact) {
     if (opp) {
       // Já na IA Tina ou já em Aguardando Atendimento → não mexe.
       if (opp.pipelineStageId === stageIaTina || opp.pipelineStageId === stageQualified) return opp.id;
+      // NÃO assume/move lead que o time está re-trabalhando (Reentrada).
+      if (blockedOppStages().includes(opp.pipelineStageId)) return opp.id;
       // Só reorganiza DENTRO do pipeline da Tina (Pré-Vendas LCA). Não puxa opp
       // de OUTRO pipeline (Closers/Editorial) pra não bagunçar o board deles.
       if (opp.pipelineId && opp.pipelineId !== pipelineId) return opp.id;
@@ -173,6 +191,10 @@ export async function claimToIaTina(contact) {
       await GHL.updateOpportunity(opp.id, { pipelineId, pipelineStageId: stageIaTina, status: 'open' });
       return opp.id;
     }
+    // Sem opp ABERTA, mas COM opp fechada (won/lost) = cliente convertido/perdido →
+    // NÃO cria duplicada na IA Tina (deixa como está). Só cria pra lead REALMENTE
+    // novo (zero opp), senão re-qualifica cliente do zero + suja o board.
+    if (ops.length) return ops[0]?.id || null;
     const created = await GHL.createOpportunity({
       pipelineId, stageId: stageIaTina, contactId: contact.ghl_contact_id,
       name: `${contact.name || 'Lead'} · IA Tina`,
