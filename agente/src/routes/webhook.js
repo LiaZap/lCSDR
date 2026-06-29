@@ -19,7 +19,7 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane, contactOppInReentrada } from '../ghl/opportunities.js';
+import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane, contactOppInReentrada, contactWorkedByOtherTeam } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff, notifyIaTinaForaJanela } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
@@ -655,12 +655,13 @@ async function handleInbound(event) {
 
   const contact = upsertContactFromGHL(ghlContact);
 
-  // 1.5a) REENTRADA — DEFAULT ON (sempre, independente do modo/whitelist): a Tina
-  // NUNCA assume lead com opp ABERTA numa stage de Reentrada (o time está
-  // re-trabalhando). Foi o caso reportado: a Tina atendeu e marcou reunião pra um
-  // lead de reentrada, atropelando o consultor que já estava na conversa.
-  if (SKIP_REENTRADA_OPP && await contactOppInReentrada(contact)) {
-    logger.info({ ghlContactId, contactId: contact.id }, 'lead em Reentrada (time re-trabalhando), Tina não assume');
+  // 1.5a) OUTRO TIME — DEFAULT ON (sempre, independente do modo/whitelist): a Tina
+  // NUNCA assume lead que outro time está trabalhando — opp ABERTA em Reentrada OU
+  // num pipeline diferente do dela (Closers/Editorial/Pré-Vendas 2.0...). Foi o
+  // caso reportado: ela atendeu e marcou reunião pra lead de reentrada, atropelando
+  // o consultor. Lead de anúncio (só opp no Funil Orgânico dela) passa normal.
+  if (SKIP_REENTRADA_OPP && await contactWorkedByOtherTeam(contact)) {
+    logger.info({ ghlContactId, contactId: contact.id }, 'lead de outro time/Reentrada, Tina não assume');
     try {
       db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_reentrada', ?)`)
         .run(contact.id, JSON.stringify({ ghlContactId }));

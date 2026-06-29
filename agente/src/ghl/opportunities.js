@@ -169,6 +169,32 @@ export async function contactOppInReentrada(contact) {
   }
 }
 
+// Lead pertence a OUTRO time (a Tina NÃO deve assumir)? True se tem opp ABERTA:
+//  (1) numa stage de REENTRADA (blockedOppStages), OU
+//  (2) num PIPELINE diferente do da Tina (Pré-Vendas LCA) — ou seja, Closers,
+//      Editorial, Pré-Vendas 2.0, etc. estão com o lead.
+// Lead novo/de anúncio só tem opp no pipeline da Tina (Funil Orgânico) → false →
+// atende. Cobre "outros funis" sem precisar listar 80 stages. Dentro do pipeline
+// da Tina, a colisão (Follow Up/Proposta) fica na detecção por MENSAGEM
+// (lastOutboundWasHuman). Falha ABERTO (erro → false → atende; não trava por hiccup).
+export async function contactWorkedByOtherTeam(contact) {
+  const { pipelineId } = resolvePipeline();
+  if (!contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return false;
+  const blocked = new Set(blockedOppStages());
+  try {
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
+    const ops = r?.opportunities || (Array.isArray(r) ? r : []);
+    return ops.some(o => {
+      if (String(o.status || 'open').toLowerCase() !== 'open') return false;
+      if (blocked.has(o.pipelineStageId)) return true;                          // Reentrada
+      if (o.pipelineId && pipelineId && o.pipelineId !== pipelineId) return true; // outro time/pipeline
+      return false;
+    });
+  } catch {
+    return false;
+  }
+}
+
 // Reivindica o lead pra Tina (re-engajamento ATIVO): move a opp pra IA Tina (ou
 // cria). NÃO reabre won/lost. Uso INTENCIONAL (script de re-engajamento) — aí o
 // lead entra na raia da Tina e ela passa a tratar as respostas dele.
