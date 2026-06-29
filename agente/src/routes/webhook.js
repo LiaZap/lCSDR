@@ -208,6 +208,13 @@ const ATTENDANCE_DAYS = Number(process.env.SKIP_ATTENDANCE_DAYS || 30);
 // quando um SDR conhecido respondeu recente).
 const ATTEND_EXCEPT_REENTRADA = process.env.TINA_ATTEND_EXCEPT_REENTRADA === 'true';
 
+// PROTEÇÃO REENTRADA — DEFAULT ON (independente do modo acima e da whitelist): a
+// Tina NUNCA assume lead com opp ABERTA numa stage de Reentrada (o time está
+// re-trabalhando). Sinal forte e barato de colisão. Desligar só com
+// SKIP_REENTRADA_OPP=false. Stages consideradas = GHL_BLOCK_OPP_STAGES (ver
+// scripts/listar-stages.js pra pegar os ids dos funis do time).
+const SKIP_REENTRADA_OPP = process.env.SKIP_REENTRADA_OPP !== 'false';
+
 // Sources que são AUTOMAÇÃO (não atendimento humano), mesmo tendo userId — o
 // GHL carimba o dono do workflow/campanha no userId. Confirmado em prod: msg
 // de workflow vem com userId preenchido.
@@ -648,10 +655,11 @@ async function handleInbound(event) {
 
   const contact = upsertContactFromGHL(ghlContact);
 
-  // 1.5b) MODO "atende todos menos Reentrada": pula lead com opp ABERTA numa stage
-  // de Reentrada (time re-trabalhando). Os de anúncio (Funil Orgânico/Follow Up)
-  // passam normal e a Tina move pra coluna dela depois.
-  if (ATTEND_EXCEPT_REENTRADA && await contactOppInReentrada(contact)) {
+  // 1.5a) REENTRADA — DEFAULT ON (sempre, independente do modo/whitelist): a Tina
+  // NUNCA assume lead com opp ABERTA numa stage de Reentrada (o time está
+  // re-trabalhando). Foi o caso reportado: a Tina atendeu e marcou reunião pra um
+  // lead de reentrada, atropelando o consultor que já estava na conversa.
+  if (SKIP_REENTRADA_OPP && await contactOppInReentrada(contact)) {
     logger.info({ ghlContactId, contactId: contact.id }, 'lead em Reentrada (time re-trabalhando), Tina não assume');
     try {
       db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'skip_reentrada', ?)`)
