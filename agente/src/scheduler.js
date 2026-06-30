@@ -2,6 +2,7 @@ import { db } from './db/index.js';
 import { GHL } from './ghl/client.js';
 import { resumeIA } from './agent/handoff.js';
 import { recordOutbound } from './agent/contactService.js';
+import { sendResumoDiaGroup } from './agent/notify.js';
 import { logger } from './utils/logger.js';
 
 const TICK_MS = 60_000; // 1 min
@@ -61,7 +62,63 @@ async function processFollowups() {
   }
 }
 
+// Resumo diário pro grupo do time no WhatsApp. Default DESLIGADO; liga com
+// RESUMO_DIA_ENABLED=true. Hora em RESUMO_DIA_HORA (0-23, horário de Brasília;
+// default 18; valor inválido/vazio cai no default). O placar é ancorado no dia
+// de Brasília (queries em notify.js usam date(...,'-3 hours')), então qualquer
+// hora 0-23 conta o dia certo. Dispara 1x/dia: reserva o evento ANTES de enviar
+// (sobrevive a restart e bloqueia os ticks seguintes); se o envio falhar, desfaz
+// a reserva pra tentar de novo no próximo tick.
+async function maybeSendResumoDia() {
+  if (process.env.RESUMO_DIA_ENABLED !== 'true') return;
+  // Sem grupo/token configurado: nem tenta (senão logaria um warn a cada tick).
+  if (!process.env.UAZAPI_NOTIFY_GROUP || !process.env.UAZAPI_TOKEN) return;
+
+  // Hora alvo (BRT). NaN/vazio/fora de 0-23 → default 18, em vez de morrer calado.
+  const raw = process.env.RESUMO_DIA_HORA;
+  let hora = (raw == null || raw === '') ? 18 : Number(raw);
+  if (!Number.isInteger(hora) || hora < 0 || hora > 23) hora = 18;
+
+  let brtHour;
+  try {
+    brtHour = Number(new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo', hour: 'numeric', hourCycle: 'h23',
+    }).format(new Date()));
+  } catch {
+    brtHour = (new Date().getUTCHours() + 21) % 24; // fallback: UTC-3
+  }
+  if (brtHour !== hora) return;
+
+  // Idempotência: no máx. 1 envio por ~dia (janela de 20h em UTC).
+  const ja = db.prepare(
+    `SELECT 1 FROM events_log WHERE kind='resumo_dia_enviado' AND created_at >= datetime('now','-20 hours') LIMIT 1`
+  ).get();
+  if (ja) return;
+
+  // Reserva o marcador ANTES de enviar: se o INSERT falhar não enviou (nada a
+  // duplicar); se o envio falhar, desfaz a reserva pra retomar no próximo tick.
+  const reserva = db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (NULL, 'resumo_dia_enviado', ?)`)
+    .run(JSON.stringify({ horaBRT: hora }));
+  const ok = await sendResumoDiaGroup();
+  if (ok) {
+    logger.info({ horaBRT: hora }, 'resumo diário enviado pro grupo');
+  } else {
+    db.prepare(`DELETE FROM events_log WHERE id = ?`).run(reserva.lastInsertRowid);
+  }
+}
+
 export function startScheduler() {
-  logger.info({ tick_ms: TICK_MS }, 'scheduler iniciado');
-  setInterval(() => { processFollowups().catch(err => logger.error(err)); }, TICK_MS);
+  const resumoOn = process.env.RESUMO_DIA_ENABLED === 'true';
+  const resumoConfigOk = Boolean(process.env.UAZAPI_NOTIFY_GROUP && process.env.UAZAPI_TOKEN);
+  if (resumoOn && !resumoConfigOk) {
+    logger.warn('RESUMO_DIA_ENABLED=true mas falta UAZAPI_NOTIFY_GROUP/UAZAPI_TOKEN — resumo diário não vai enviar');
+  }
+  logger.info({
+    tick_ms: TICK_MS,
+    resumoDia: resumoOn ? (resumoConfigOk ? `ligado (${process.env.RESUMO_DIA_HORA || 18}h BRT)` : 'ligado mas sem grupo/token') : 'desligado',
+  }, 'scheduler iniciado');
+  setInterval(() => {
+    processFollowups().catch(err => logger.error(err));
+    maybeSendResumoDia().catch(err => logger.error(err));
+  }, TICK_MS);
 }

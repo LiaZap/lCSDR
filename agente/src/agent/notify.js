@@ -118,3 +118,83 @@ export async function notifyAgendamento(contact, { label, iso, funnel, calendarI
   await notifyGroupUazapi(msg);
   await notifyContactGHL(msg);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESUMO DIÁRIO (placar do dia) pro grupo do time no WhatsApp.
+// Mesmas definições do painel (Visão geral / dashboard.js) pros números baterem.
+// Disparado pelo scheduler quando RESUMO_DIA_ENABLED=true (ver scheduler.js).
+// "Dia" = dia de Brasília: as queries usam date(...,'-3 hours') (o server roda em
+// UTC), então o placar conta o dia certo em qualquer hora de disparo.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// "Equipe assumiu" HOJE — MESMA regra do dashboard (dashboard.js, time_assumiu):
+// leads distintos com QUALQUER sinal de entrega ao time (stage handoff/
+// em_atendimento — o sinal mais confiável — OU evento de handoff OU SDR respondeu).
+function timeAssumiuHoje() {
+  return db.prepare(`
+    SELECT COUNT(DISTINCT cid) c FROM (
+      SELECT id cid         FROM contacts   WHERE stage IN ('handoff','em_atendimento') AND ghl_contact_id NOT LIKE 'playground-%' AND date(created_at,'-3 hours')=date('now','-3 hours')
+      UNION
+      SELECT contact_id cid FROM events_log WHERE kind IN ('live_handoff','handoff_publicar','handoff_aluno') AND date(created_at,'-3 hours')=date('now','-3 hours')
+      UNION
+      SELECT contact_id cid FROM messages   WHERE author='sdr' AND date(created_at,'-3 hours')=date('now','-3 hours')
+    )
+  `).get()?.c || 0;
+}
+
+// Monta o texto do resumo do dia (formatado pro WhatsApp).
+export function buildResumoDiaText() {
+  const data = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  // atendeu/conversaram: exclui playground (igual ao painel) pros números baterem.
+  const atendeu = db.prepare(`
+    SELECT COUNT(DISTINCT m.contact_id) c FROM messages m JOIN contacts c ON c.id = m.contact_id
+    WHERE m.author='ia' AND c.ghl_contact_id NOT LIKE 'playground-%' AND date(m.created_at,'-3 hours')=date('now','-3 hours')
+  `).get()?.c || 0;
+  const agendou = db.prepare(`SELECT COUNT(*) c FROM events_log WHERE kind='reuniao_agendada' AND date(created_at,'-3 hours')=date('now','-3 hours')`).get()?.c || 0;
+  const timeAssumiu = timeAssumiuHoje();
+  const leadsHoje = db.prepare(`
+    SELECT COUNT(DISTINCT m.contact_id) c FROM messages m JOIN contacts c ON c.id = m.contact_id
+    WHERE m.direction='inbound' AND c.ghl_contact_id NOT LIKE 'playground-%' AND date(m.created_at,'-3 hours')=date('now','-3 hours')
+  `).get()?.c || 0;
+
+  const linhas = [
+    `📊 *Resumo da Tina — ${data}*`,
+    ``,
+    `🤖 Atendidos: *${atendeu}* ${atendeu === 1 ? 'lead' : 'leads'}`,
+    `🗓️ Agendados: *${agendou}* ${agendou === 1 ? 'reunião' : 'reuniões'}`,
+    `👤 Equipe assumiu: *${timeAssumiu}* ${timeAssumiu === 1 ? 'lead' : 'leads'}`,
+  ];
+
+  // Reuniões de hoje por consultor (rodízio) — só se houver.
+  const ag = db.prepare(`SELECT payload FROM events_log WHERE kind='reuniao_agendada' AND date(created_at,'-3 hours')=date('now','-3 hours')`).all();
+  if (ag.length) {
+    const porConsultor = {};
+    for (const r of ag) {
+      let p = {}; try { p = JSON.parse(r.payload); } catch {}
+      const nome = calendarName(p.calendarId) || '(a definir)';
+      porConsultor[nome] = (porConsultor[nome] || 0) + 1;
+    }
+    linhas.push(``, `🗓️ *Reuniões por consultor:*`);
+    for (const [k, v] of Object.entries(porConsultor)) linhas.push(`   • ${k}: ${v}`);
+  }
+
+  linhas.push(``, `👥 Conversaram hoje: ${leadsHoje}`, ``, `_Detalhes e outros períodos no painel._`);
+  return linhas.join('\n');
+}
+
+// Envia o resumo do dia pro grupo do time. Retorna true só se realmente enviou
+// (grupo+token configurados e uazapi aceitou) — o scheduler usa isso pra só
+// marcar como "enviado hoje" quando deu certo.
+export async function sendResumoDiaGroup() {
+  if (!NOTIFY_GROUP || !process.env.UAZAPI_TOKEN) {
+    logger.warn('resumo diário: UAZAPI_NOTIFY_GROUP/UAZAPI_TOKEN ausentes — não enviado');
+    return false;
+  }
+  try {
+    await UAZAPI.sendText(NOTIFY_GROUP, buildResumoDiaText());
+    return true;
+  } catch (err) {
+    logger.error({ err: err.message }, 'falha ao enviar resumo diário pro grupo');
+    return false;
+  }
+}
