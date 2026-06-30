@@ -12,11 +12,19 @@ import LeadDetail from './pages/LeadDetail.jsx';
 import Playground from './pages/Playground.jsx';
 import Feedback from './pages/Feedback.jsx';
 
+// ADMIN do painel = SÓ estes emails (Paulo + Pedro). Todos os outros logins
+// (Lilian, Isabella, closers, sdrs...) veem apenas Visão geral + Leads. Não usa
+// o `role` do banco de propósito (role admin lá é usado p/ outras coisas).
+// Configurável por env de build: VITE_ADMIN_EMAILS="a@x.com,b@y.com".
+const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || 'paulo@bep.media,pedro@bep.media')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+function isAdminUser(user) {
+  return !!user && ADMIN_EMAILS.includes(String(user.email || '').toLowerCase());
+}
+
 function Shell({ children }) {
   const user = getUser();
-  // Só admin vê Conversas / Playground / Feedback. Time (sdr/closer) vê só
-  // Visão geral + Leads.
-  const isAdmin = (user?.role || '') === 'admin';
+  const isAdmin = isAdminUser(user); // só Paulo/Pedro veem Conversas/Playground/Feedback
   const nav = useNavigate();
   const location = useLocation();
   const [theme, setTheme] = useState(getTheme());
@@ -121,11 +129,11 @@ function Shell({ children }) {
   );
 }
 
-// Rotas só de admin: time (sdr/closer) que digitar a URL direto cai na Visão geral.
+// Rotas só de admin (Paulo/Pedro): quem não for digitar a URL direto cai na Visão geral.
 function RequireAdmin({ children }) {
   const user = getUser();
   if (!user) return <Navigate to="/login" />;
-  if ((user.role || '') !== 'admin') return <Navigate to="/" replace />;
+  if (!isAdminUser(user)) return <Navigate to="/" replace />;
   return children;
 }
 

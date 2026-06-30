@@ -8,6 +8,12 @@ import { recordOutbound } from '../agent/contactService.js';
 const router = express.Router();
 router.use(authMiddleware);
 
+// ADMIN real do painel (vê custo da IA etc.) = só estes emails. Não usa o `role`
+// do banco (lá tem outros admins p/ outras coisas). Env: ADMIN_EMAILS=a@x,b@y.
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'paulo@bep.media,pedro@bep.media')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const isPanelAdmin = (req) => ADMIN_EMAILS.includes(String(req.user?.email || '').toLowerCase());
+
 // Filtro de data flexível pros endpoints de métricas/listas:
 //   ?from=YYYY-MM-DD&to=YYYY-MM-DD → range PERSONALIZADO (de X até Y)
 //   ?days=N → últimos N dias   ·   ?days=0 ou ?all=1 → todo período (GERAL)
@@ -336,7 +342,7 @@ router.get('/sdrs', (req, res) => {
 // Mostra: total hoje, última hora, top 5 conversas mais caras, breakdown
 // por provider e por versão de prompt. Refresh sugerido: 30s.
 router.get('/admin/cost-now', (req, res) => {
-  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+  if (!isPanelAdmin(req)) return res.status(403).json({ error: 'admin only' });
 
   const today = db.prepare(`
     SELECT
