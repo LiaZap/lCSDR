@@ -94,7 +94,18 @@ router.get('/metrics', (req, res) => {
     WHERE kind = 'reuniao_agendada'${dfe.clause}
   `).get(...dfe.params)?.c || 0;
 
-  res.json({ totais, porFunil, custo, porDia, tempoResposta, atendidos, agendados });
+  // TIME ASSUMIU: leads distintos que um SDR respondeu (author='sdr') OU que a
+  // Tina passou pro time ("falar agora" / live_handoff).
+  const dfc = dateFilter(req, 'created_at');
+  const time_assumiu = db.prepare(`
+    SELECT COUNT(DISTINCT cid) as c FROM (
+      SELECT contact_id cid FROM messages   WHERE author = 'sdr'${dfc.clause}
+      UNION
+      SELECT contact_id cid FROM events_log WHERE kind = 'live_handoff'${dfc.clause}
+    )
+  `).get(...dfc.params, ...dfc.params)?.c || 0;
+
+  res.json({ totais, porFunil, custo, porDia, tempoResposta, atendidos, agendados, time_assumiu });
 });
 
 // === Lista de leads ATENDIDOS pela Tina no período (quem ela respondeu) ===
