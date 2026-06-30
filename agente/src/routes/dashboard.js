@@ -8,12 +8,32 @@ import { recordOutbound } from '../agent/contactService.js';
 const router = express.Router();
 router.use(authMiddleware);
 
+// Filtro de data flexível pros endpoints de métricas/listas:
+//   ?from=YYYY-MM-DD&to=YYYY-MM-DD → range PERSONALIZADO (de X até Y)
+//   ?days=N → últimos N dias   ·   ?days=0 ou ?all=1 → todo período (GERAL)
+// Retorna { clause, params } pra concatenar no WHERE da query.
+function dateFilter(req, col) {
+  const { from, to } = req.query;
+  if (from || to) {
+    const parts = [], params = [];
+    if (from) { parts.push(`${col} >= ?`); params.push(String(from).slice(0, 10) + ' 00:00:00'); }
+    if (to)   { parts.push(`${col} <= ?`); params.push(String(to).slice(0, 10) + ' 23:59:59'); }
+    return { clause: parts.length ? ' AND ' + parts.join(' AND ') : '', params };
+  }
+  if (req.query.all) return { clause: '', params: [] };                 // geral
+  const raw = req.query.days;
+  const days = (raw === undefined || raw === null || raw === '') ? 7 : Number(raw);
+  if (!Number.isFinite(days) || days <= 0) return { clause: '', params: [] }; // days=0 = geral
+  return { clause: ` AND ${col} >= datetime('now', '-' || ? || ' days')`, params: [days] };
+}
+
 // === Métricas gerais do período ===
 // Exclui contatos de playground (ghl_contact_id começa com "playground-") pra não poluir stats.
 router.get('/metrics', (req, res) => {
-  let days = Number(req.query.days || 7);
-  if (!days || days <= 0 || req.query.all) days = 36500; // days=0 ou ?all = todo período (geral)
   const NOT_PG = "c.ghl_contact_id NOT LIKE 'playground-%'";
+  const df  = dateFilter(req, 'c.created_at');  // queries de contacts (alias c)
+  const dfm = dateFilter(req, 'm.created_at');  // custo / atendidos (messages)
+  const dfe = dateFilter(req, 'created_at');    // events_log (agendados)
 
   const totais = db.prepare(`
     SELECT
@@ -23,109 +43,85 @@ router.get('/metrics', (req, res) => {
       SUM(CASE WHEN c.stage = 'handoff' THEN 1 ELSE 0 END) as em_handoff,
       SUM(CASE WHEN c.stage IN ('novo','pre_qualificando','qualificando') THEN 1 ELSE 0 END) as em_atendimento
     FROM contacts c
-    WHERE ${NOT_PG} AND c.created_at >= datetime('now', '-' || ? || ' days')
-  `).get(days);
+    WHERE ${NOT_PG}${df.clause}
+  `).get(...df.params);
 
-  // Tempo médio de 1ª resposta (entre primeira mensagem inbound e primeira outbound da IA)
-  // Útil pro Lilian ver que a Tina responde em segundos vs SDR humano que demora horas
+  // Tempo médio de 1ª resposta (entre 1ª inbound e 1ª outbound da IA).
   const tempoResposta = db.prepare(`
     SELECT AVG(diff_seconds) as media, MIN(diff_seconds) as menor, MAX(diff_seconds) as maior
     FROM (
-      SELECT
-        c.id,
+      SELECT c.id,
         (julianday(MIN(CASE WHEN m.author='ia' THEN m.created_at END))
-         - julianday(MIN(CASE WHEN m.direction='inbound' THEN m.created_at END))
-        ) * 86400 AS diff_seconds
-      FROM contacts c
-      JOIN messages m ON m.contact_id = c.id
-      WHERE c.ghl_contact_id NOT LIKE 'playground-%'
-        AND c.created_at >= datetime('now', '-' || ? || ' days')
+         - julianday(MIN(CASE WHEN m.direction='inbound' THEN m.created_at END))) * 86400 AS diff_seconds
+      FROM contacts c JOIN messages m ON m.contact_id = c.id
+      WHERE c.ghl_contact_id NOT LIKE 'playground-%'${df.clause}
       GROUP BY c.id
       HAVING diff_seconds IS NOT NULL AND diff_seconds > 0
     )
-  `).get(days);
+  `).get(...df.params);
 
   const porFunil = db.prepare(`
     SELECT COALESCE(funnel, 'indefinido') as funnel, COUNT(*) as total
     FROM contacts c
-    WHERE ${NOT_PG} AND c.created_at >= datetime('now', '-' || ? || ' days')
+    WHERE ${NOT_PG}${df.clause}
     GROUP BY funnel
-  `).all(days);
+  `).all(...df.params);
 
   const custo = db.prepare(`
-    SELECT
-      COALESCE(SUM(m.tokens_in), 0) as tokens_in,
-      COALESCE(SUM(m.tokens_out), 0) as tokens_out,
-      COALESCE(SUM(m.cost_usd), 0) as cost_usd,
-      COUNT(*) as mensagens_ia
-    FROM messages m
-    JOIN contacts c ON c.id = m.contact_id
-    WHERE ${NOT_PG} AND m.author = 'ia' AND m.created_at >= datetime('now', '-' || ? || ' days')
-  `).get(days);
+    SELECT COALESCE(SUM(m.tokens_in),0) as tokens_in, COALESCE(SUM(m.tokens_out),0) as tokens_out,
+      COALESCE(SUM(m.cost_usd),0) as cost_usd, COUNT(*) as mensagens_ia
+    FROM messages m JOIN contacts c ON c.id = m.contact_id
+    WHERE ${NOT_PG} AND m.author = 'ia'${dfm.clause}
+  `).get(...dfm.params);
 
   const porDia = db.prepare(`
     SELECT date(c.created_at) as dia, COUNT(*) as total,
       SUM(CASE WHEN c.stage = 'qualificado' THEN 1 ELSE 0 END) as qualificados
     FROM contacts c
-    WHERE ${NOT_PG} AND c.created_at >= datetime('now', '-' || ? || ' days')
+    WHERE ${NOT_PG}${df.clause}
     GROUP BY date(c.created_at)
     ORDER BY dia ASC
-  `).all(days);
+  `).all(...df.params);
 
-  // Volume por hora do dia (heatmap futuro / horário de pico)
-  const porHora = db.prepare(`
-    SELECT
-      CAST(strftime('%H', c.created_at) AS INTEGER) as hora,
-      COUNT(*) as total
-    FROM contacts c
-    WHERE ${NOT_PG} AND c.created_at >= datetime('now', '-' || ? || ' days')
-    GROUP BY hora
-    ORDER BY hora
-  `).all(days);
-
-  // ATENDIDOS pela Tina (leads distintos que receberam msg author='ia') +
-  // AGENDADOS (reuniões marcadas pela Tina) no período.
+  // ATENDIDOS (leads distintos que a Tina respondeu) + AGENDADOS (reuniões).
   const atendidos = db.prepare(`
     SELECT COUNT(DISTINCT m.contact_id) as c
     FROM messages m JOIN contacts c ON c.id = m.contact_id
-    WHERE m.author = 'ia' AND ${NOT_PG} AND m.created_at >= datetime('now', '-' || ? || ' days')
-  `).get(days)?.c || 0;
+    WHERE m.author = 'ia' AND ${NOT_PG}${dfm.clause}
+  `).get(...dfm.params)?.c || 0;
   const agendados = db.prepare(`
     SELECT COUNT(*) as c FROM events_log
-    WHERE kind = 'reuniao_agendada' AND created_at >= datetime('now', '-' || ? || ' days')
-  `).get(days)?.c || 0;
+    WHERE kind = 'reuniao_agendada'${dfe.clause}
+  `).get(...dfe.params)?.c || 0;
 
-  res.json({ totais, porFunil, custo, porDia, porHora, tempoResposta, atendidos, agendados });
+  res.json({ totais, porFunil, custo, porDia, tempoResposta, atendidos, agendados });
 });
 
 // === Lista de leads ATENDIDOS pela Tina no período (quem ela respondeu) ===
 router.get('/atendidos', (req, res) => {
-  let days = Number(req.query.days || 7);
-  if (!days || days <= 0 || req.query.all) days = 36500; // days=0 ou ?all = todo período (geral)
+  const dfm = dateFilter(req, 'm.created_at');
   const rows = db.prepare(`
     SELECT c.id, c.name, c.phone, c.funnel, c.stage,
       MAX(m.created_at) as ultima_resposta, COUNT(m.id) as msgs_ia
     FROM contacts c JOIN messages m ON m.contact_id = c.id
-    WHERE m.author = 'ia' AND c.ghl_contact_id NOT LIKE 'playground-%'
-      AND m.created_at >= datetime('now', '-' || ? || ' days')
+    WHERE m.author = 'ia' AND c.ghl_contact_id NOT LIKE 'playground-%'${dfm.clause}
     GROUP BY c.id
     ORDER BY ultima_resposta DESC
     LIMIT ?
-  `).all(days, Number(req.query.limit || 1000));
+  `).all(...dfm.params, Number(req.query.limit || 1000));
   res.json({ total: rows.length, atendidos: rows });
 });
 
 // === Lista de AGENDAMENTOS (reuniões que a Tina marcou) no período ===
 router.get('/agendados', (req, res) => {
-  let days = Number(req.query.days || 7);
-  if (!days || days <= 0 || req.query.all) days = 36500; // days=0 ou ?all = todo período (geral)
+  const dfe = dateFilter(req, 'e.created_at');
   const rows = db.prepare(`
     SELECT e.created_at, e.payload, c.name, c.phone, c.funnel
     FROM events_log e LEFT JOIN contacts c ON c.id = e.contact_id
-    WHERE e.kind = 'reuniao_agendada' AND e.created_at >= datetime('now', '-' || ? || ' days')
+    WHERE e.kind = 'reuniao_agendada'${dfe.clause}
     ORDER BY e.id DESC
     LIMIT ?
-  `).all(days, Number(req.query.limit || 1000));
+  `).all(...dfe.params, Number(req.query.limit || 1000));
   const agendados = rows.map(r => {
     let p = {}; try { p = JSON.parse(r.payload); } catch {}
     return {
