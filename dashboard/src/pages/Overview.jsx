@@ -43,6 +43,7 @@ export default function Overview() {
   const qualificados = totais.qualificados || 0;
   const desqualificados = totais.desqualificados || 0;
   const emAtendimento = totais.em_atendimento || 0;
+  const equipeAssumiu = data?.time_assumiu || 0;
   const taxaQualificacao = totalLeads ? Math.round((qualificados / totalLeads) * 100) : 0;
   const taxaFiltro = totalLeads ? Math.round((desqualificados / totalLeads) * 100) : 0;
 
@@ -152,12 +153,11 @@ export default function Overview() {
           sparkColor="var(--lc-magenta-600)"
         />
         <KpiCard
-          label="Filtrados"
-          value={desqualificados}
-          hint={`${taxaFiltro}% lixo cortado`}
+          label="Equipe assumiu"
+          value={equipeAssumiu}
+          hint="leads que o time pegou"
           spark={porDia.map(d => ({ v: 0 }))}
           sparkColor="var(--lc-stone)"
-          delta={taxaFiltro >= 20 ? { dir: 'flat', value: `${taxaFiltro}% lixo` } : null}
         />
       </div>
 
@@ -322,13 +322,6 @@ function generateInsights({ porDia, porFunil, porHora, tempoResposta, taxaQualif
       detail: 'Acima da média, Tina qualificando bem',
       color: 'var(--lc-success)',
     });
-  } else if (taxaQualificacao < 15 && totalLeads >= 10) {
-    ins.push({
-      icon: '⚠',
-      title: `${taxaQualificacao}% qualificação baixa`,
-      detail: 'Refinar prompt ou revisar criativos',
-      color: 'var(--lc-warn)',
-    });
   }
 
   // Insight 4: top funil
@@ -340,19 +333,6 @@ function generateInsights({ porDia, porFunil, porHora, tempoResposta, taxaQualif
       detail: `${topFunil.total} leads (${Math.round(topFunil.total / totalLeads * 100)}% do total)`,
       color: 'var(--lc-magenta)',
     });
-  }
-
-  // Insight 5: hora de pico
-  if (porHora.length > 0) {
-    const peak = [...porHora].sort((a, b) => b.total - a.total)[0];
-    if (peak && peak.total >= 3) {
-      ins.push({
-        icon: '⏰',
-        title: `Pico às ${String(peak.hora).padStart(2, '0')}h`,
-        detail: `${peak.total} leads nesse horário, melhor pra rodar tráfego`,
-        color: 'var(--lc-magenta)',
-      });
-    }
   }
 
   return ins.slice(0, 4);

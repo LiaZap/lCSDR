@@ -14,6 +14,9 @@ import Feedback from './pages/Feedback.jsx';
 
 function Shell({ children }) {
   const user = getUser();
+  // Só admin vê Conversas / Playground / Feedback. Time (sdr/closer) vê só
+  // Visão geral + Leads.
+  const isAdmin = (user?.role || '') === 'admin';
   const nav = useNavigate();
   const location = useLocation();
   const [theme, setTheme] = useState(getTheme());
@@ -74,18 +77,22 @@ function Shell({ children }) {
           <NavLink to="/" end>
             <Icon.Overview className="nav-ico" /> Visão geral
           </NavLink>
-          <NavLink to="/conversas">
-            <Icon.Inbox className="nav-ico" /> Conversas
-          </NavLink>
           <NavLink to="/leads">
             <Icon.Kanban className="nav-ico" /> Leads
           </NavLink>
-          <NavLink to="/playground">
-            <Icon.Play className="nav-ico" /> Playground
-          </NavLink>
-          <NavLink to="/feedback">
-            <Icon.Check className="nav-ico" /> Feedback
-          </NavLink>
+          {isAdmin && (
+            <>
+              <NavLink to="/conversas">
+                <Icon.Inbox className="nav-ico" /> Conversas
+              </NavLink>
+              <NavLink to="/playground">
+                <Icon.Play className="nav-ico" /> Playground
+              </NavLink>
+              <NavLink to="/feedback">
+                <Icon.Check className="nav-ico" /> Feedback
+              </NavLink>
+            </>
+          )}
         </nav>
 
         <div>
@@ -114,16 +121,24 @@ function Shell({ children }) {
   );
 }
 
+// Rotas só de admin: time (sdr/closer) que digitar a URL direto cai na Visão geral.
+function RequireAdmin({ children }) {
+  const user = getUser();
+  if (!user) return <Navigate to="/login" />;
+  if ((user.role || '') !== 'admin') return <Navigate to="/" replace />;
+  return children;
+}
+
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<Shell><Overview /></Shell>} />
-      <Route path="/conversas" element={<Shell><Conversations /></Shell>} />
+      <Route path="/conversas" element={<RequireAdmin><Shell><Conversations /></Shell></RequireAdmin>} />
       <Route path="/leads" element={<Shell><Leads /></Shell>} />
       <Route path="/leads/:id" element={<Shell><LeadDetail /></Shell>} />
-      <Route path="/playground" element={<Shell><Playground /></Shell>} />
-      <Route path="/feedback" element={<Shell><Feedback /></Shell>} />
+      <Route path="/playground" element={<RequireAdmin><Shell><Playground /></Shell></RequireAdmin>} />
+      <Route path="/feedback" element={<RequireAdmin><Shell><Feedback /></Shell></RequireAdmin>} />
     </Routes>
   );
 }
