@@ -82,7 +82,54 @@ router.get('/metrics', (req, res) => {
     ORDER BY hora
   `).all(days);
 
-  res.json({ totais, porFunil, custo, porDia, porHora, tempoResposta });
+  // ATENDIDOS pela Tina (leads distintos que receberam msg author='ia') +
+  // AGENDADOS (reuniões marcadas pela Tina) no período.
+  const atendidos = db.prepare(`
+    SELECT COUNT(DISTINCT m.contact_id) as c
+    FROM messages m JOIN contacts c ON c.id = m.contact_id
+    WHERE m.author = 'ia' AND ${NOT_PG} AND m.created_at >= datetime('now', '-' || ? || ' days')
+  `).get(days)?.c || 0;
+  const agendados = db.prepare(`
+    SELECT COUNT(*) as c FROM events_log
+    WHERE kind = 'reuniao_agendada' AND created_at >= datetime('now', '-' || ? || ' days')
+  `).get(days)?.c || 0;
+
+  res.json({ totais, porFunil, custo, porDia, porHora, tempoResposta, atendidos, agendados });
+});
+
+// === Lista de leads ATENDIDOS pela Tina no período (quem ela respondeu) ===
+router.get('/atendidos', (req, res) => {
+  const days = Number(req.query.days || 7);
+  const rows = db.prepare(`
+    SELECT c.id, c.name, c.phone, c.funnel, c.stage,
+      MAX(m.created_at) as ultima_resposta, COUNT(m.id) as msgs_ia
+    FROM contacts c JOIN messages m ON m.contact_id = c.id
+    WHERE m.author = 'ia' AND c.ghl_contact_id NOT LIKE 'playground-%'
+      AND m.created_at >= datetime('now', '-' || ? || ' days')
+    GROUP BY c.id
+    ORDER BY ultima_resposta DESC
+  `).all(days);
+  res.json({ total: rows.length, atendidos: rows });
+});
+
+// === Lista de AGENDAMENTOS (reuniões que a Tina marcou) no período ===
+router.get('/agendados', (req, res) => {
+  const days = Number(req.query.days || 7);
+  const rows = db.prepare(`
+    SELECT e.created_at, e.payload, c.name, c.phone, c.funnel
+    FROM events_log e LEFT JOIN contacts c ON c.id = e.contact_id
+    WHERE e.kind = 'reuniao_agendada' AND e.created_at >= datetime('now', '-' || ? || ' days')
+    ORDER BY e.id DESC
+  `).all(days);
+  const agendados = rows.map(r => {
+    let p = {}; try { p = JSON.parse(r.payload); } catch {}
+    return {
+      name: r.name, phone: r.phone, funnel: p.funnel || r.funnel || null,
+      quando: p.label || p.iso || null, calendarId: p.calendarId || null,
+      agendado_em: r.created_at,
+    };
+  });
+  res.json({ total: agendados.length, agendados });
 });
 
 // === Lista de contatos com filtros ===
