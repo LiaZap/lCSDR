@@ -24,6 +24,27 @@ function rowsToday(kind) {
 console.log('\n════════ RESUMO DO DIA — TINA ════════');
 console.log('(' + new Date().toLocaleDateString('pt-BR') + ')\n');
 
+// ═══ PLACAR (resumo rápido pra mandar pro grupo) ═══
+const _atendeu = db.prepare(`SELECT COUNT(DISTINCT contact_id) c FROM messages WHERE author='ia' AND date(created_at)=date('now')`).get()?.c || 0;
+const _msgsIa = db.prepare(`SELECT COUNT(*) c FROM messages WHERE author='ia' AND date(created_at)=date('now')`).get()?.c || 0;
+const _agendou = countToday('reuniao_agendada');
+const _conv = _atendeu ? Math.round((_agendou / _atendeu) * 100) : 0;
+const _falarAgora = countToday('live_handoff');
+const _sdrMsg = db.prepare(`SELECT COUNT(DISTINCT contact_id) c FROM messages WHERE author='sdr' AND date(created_at)=date('now')`).get()?.c || 0;
+// "Time assumiu" = leads que o SDR respondeu OU que a Tina passou ("falar agora").
+const _timeAssumiu = db.prepare(`
+  SELECT COUNT(DISTINCT cid) c FROM (
+    SELECT contact_id cid FROM messages   WHERE author='sdr'        AND date(created_at)=date('now')
+    UNION
+    SELECT contact_id cid FROM events_log WHERE kind='live_handoff' AND date(created_at)=date('now')
+  )`).get()?.c || 0;
+
+console.log('═══ PLACAR DO DIA ═══');
+console.log('🤖 Tina atendeu:   ' + _atendeu + ' leads  (' + _msgsIa + ' msgs)');
+console.log('🗓️  Agendou:        ' + _agendou + ' reuniões  (' + _conv + '% dos atendidos)');
+console.log('👤 Time assumiu:   ' + _timeAssumiu + ' leads  (' + _falarAgora + ' "falar agora" + ' + _sdrMsg + ' SDR respondeu)');
+console.log('─────────────────────\n');
+
 // Leads que mandaram mensagem hoje
 const leadsHoje = db.prepare(`
   SELECT COUNT(DISTINCT contact_id) c FROM messages
