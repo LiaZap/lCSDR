@@ -39,8 +39,14 @@ export const api = {
   login(email, password) {
     return request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
   },
-  metrics(days = 7) {
-    return request(`/api/metrics?days=${days}`);
+  metrics(q = 'days=7') {
+    return request(`/api/metrics?${q}`);
+  },
+  atendidos(q = 'days=7') {
+    return request(`/api/atendidos?${q}`);
+  },
+  agendados(q = 'days=7') {
+    return request(`/api/agendados?${q}`);
   },
   contacts(filters = {}) {
     const qs = new URLSearchParams(Object.entries(filters).filter(([_, v]) => v)).toString();

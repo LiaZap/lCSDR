@@ -19,18 +19,46 @@ const FUNNEL_LABELS = {
   indefinido: 'Indefinido',
 };
 
+// Período → querystring pra API (days=N | all=1 | from=&to=).
+function periodQuery(p) {
+  if (p.all) return 'all=1';
+  if (p.from || p.to) {
+    const parts = [];
+    if (p.from) parts.push('from=' + p.from);
+    if (p.to) parts.push('to=' + p.to);
+    return parts.join('&');
+  }
+  return 'days=' + (p.days || 7);
+}
+function periodLabel(p) {
+  if (p.all) return 'Todo período';
+  if (p.from || p.to) return `${p.from || '…'} → ${p.to || '…'}`;
+  return `Últimos ${p.days || 7} dias`;
+}
+function fmtDate(s) {
+  if (!s) return '—';
+  const d = new Date(String(s).replace(' ', 'T') + 'Z'); // banco é UTC
+  if (isNaN(d.getTime())) return s;
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
 export default function Overview() {
-  const [days, setDays] = useState(7);
+  const [period, setPeriod] = useState({ days: 7 });
   const [data, setData] = useState(null);
+  const [atendidos, setAtendidos] = useState([]);
+  const [agendados, setAgendados] = useState([]);
   const user = getUser();
   // Estado local em vez de ler localStorage direto: permite fechar sem reload
   const [seenWelcome, setSeenWelcome] = useState(
     typeof window !== 'undefined' && localStorage.getItem('lc_welcome_seen') === '1'
   );
 
+  const q = periodQuery(period);
   useEffect(() => {
-    api.metrics(days).then(setData).catch(console.error);
-  }, [days]);
+    api.metrics(q).then(setData).catch(console.error);
+    api.atendidos(q + '&limit=500').then(r => setAtendidos(r.atendidos || [])).catch(console.error);
+    api.agendados(q + '&limit=500').then(r => setAgendados(r.agendados || [])).catch(console.error);
+  }, [q]);
 
   // Defaults defensivos (importante: hooks devem ser chamados ANTES de qualquer return)
   const totais = data?.totais || {};
@@ -97,14 +125,22 @@ export default function Overview() {
       <div className="page-header">
         <div>
           <h1>Visão geral</h1>
-          <div className="muted small">Últimos {days} dias · atualizado agora</div>
+          <div className="muted small">{periodLabel(period)} · atualizado agora</div>
         </div>
-        <div className="row">
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {[7, 15, 30].map(d => (
-            <button key={d} className={d === days ? 'accent' : ''} onClick={() => setDays(d)}>
+            <button key={d} className={period.days === d ? 'accent' : ''} onClick={() => setPeriod({ days: d })}>
               {d}d
             </button>
           ))}
+          <button className={period.all ? 'accent' : ''} onClick={() => setPeriod({ all: true })}>Geral</button>
+          <input type="date" value={period.from || ''} max={period.to || undefined}
+            onChange={e => setPeriod(p => ({ from: e.target.value, to: p.to }))}
+            style={{ padding: '4px 8px', fontSize: 12 }} title="De" />
+          <span className="small muted">até</span>
+          <input type="date" value={period.to || ''} min={period.from || undefined}
+            onChange={e => setPeriod(p => ({ from: p.from, to: e.target.value }))}
+            style={{ padding: '4px 8px', fontSize: 12 }} title="Até" />
         </div>
       </div>
 
@@ -243,6 +279,67 @@ export default function Overview() {
                 );
               })}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* === Atendidos × Agendados (listas) === */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <h3>Atendidos pela Tina</h3>
+            <span className="small muted">{atendidos.length}</span>
+          </div>
+          <div style={{ marginTop: 12, maxHeight: 360, overflow: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text-tertiary)' }}>
+                  <th style={{ padding: '4px 6px' }}>Lead</th>
+                  <th style={{ padding: '4px 6px' }}>Funil</th>
+                  <th style={{ padding: '4px 6px' }}>Última resposta</th>
+                  <th style={{ padding: '4px 6px' }}>Msgs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {atendidos.map(a => (
+                  <tr key={a.id} style={{ borderTop: '1px solid var(--border-soft)' }}>
+                    <td style={{ padding: '4px 6px' }}>{a.name || '—'}</td>
+                    <td style={{ padding: '4px 6px', textTransform: 'capitalize' }}>{a.funnel || '—'}</td>
+                    <td style={{ padding: '4px 6px' }} className="small muted">{fmtDate(a.ultima_resposta)}</td>
+                    <td style={{ padding: '4px 6px' }}>{a.msgs_ia}</td>
+                  </tr>
+                ))}
+                {!atendidos.length && <tr><td colSpan={4} className="small muted" style={{ padding: '8px 6px' }}>Nenhum no período.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <h3>Agendados</h3>
+            <span className="small muted">{agendados.length}</span>
+          </div>
+          <div style={{ marginTop: 12, maxHeight: 360, overflow: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text-tertiary)' }}>
+                  <th style={{ padding: '4px 6px' }}>Lead</th>
+                  <th style={{ padding: '4px 6px' }}>Quando</th>
+                  <th style={{ padding: '4px 6px' }}>Funil</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agendados.map((a, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid var(--border-soft)' }}>
+                    <td style={{ padding: '4px 6px' }}>{a.name || '—'}</td>
+                    <td style={{ padding: '4px 6px' }} className="small">{a.quando || '—'}</td>
+                    <td style={{ padding: '4px 6px', textTransform: 'capitalize' }}>{a.funnel || '—'}</td>
+                  </tr>
+                ))}
+                {!agendados.length && <tr><td colSpan={3} className="small muted" style={{ padding: '8px 6px' }}>Nenhum no período.</td></tr>}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
