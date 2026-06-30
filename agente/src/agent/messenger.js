@@ -21,6 +21,14 @@ export function preferredChannel() {
   return process.env.UAZAPI_INBOUND_ENABLED === 'true' ? 'uazapi' : 'ghl';
 }
 
+// Canal de ENVIO no GHL (campo `type` da API de conversas). Default 'WhatsApp'.
+// Se o GHL passar a rotear o WhatsApp como canal SMS (ex.: integração Stevo p/
+// trackeamento), setar GHL_OUTBOUND_TYPE=SMS — senão a Tina envia como WhatsApp
+// e o GHL não entrega (canal não bate com o do contato).
+function ghlOutboundType() {
+  return process.env.GHL_OUTBOUND_TYPE || 'WhatsApp';
+}
+
 /**
  * Envia mensagem de texto pro lead.
  * @param {object} contact — {ghl_contact_id, phone, name}
@@ -36,7 +44,7 @@ export async function sendText(contact, text, opts = {}) {
   return GHL.sendMessage({
     contactId: contact.ghl_contact_id,
     message: text,
-    type: opts.ghlChannelType || 'WhatsApp',
+    type: opts.ghlChannelType || ghlOutboundType(),
   });
 }
 
@@ -60,7 +68,7 @@ export async function sendMenu(contact, { text, choices, footerText, type = 'but
   return GHL.sendMessage({
     contactId: contact.ghl_contact_id,
     message: fallbackText,
-    type: 'WhatsApp',
+    type: ghlOutboundType(),
   });
 }
 
