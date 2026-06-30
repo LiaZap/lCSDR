@@ -387,29 +387,7 @@ function generateInsights({ porDia, porFunil, porHora, tempoResposta, taxaQualif
     });
   }
 
-  // Insight 2: tendência (último dia vs penúltimo)
-  if (porDia.length >= 2) {
-    const last = porDia[porDia.length - 1];
-    const prev = porDia[porDia.length - 2];
-    const diff = (last.total || 0) - (prev.total || 0);
-    if (diff > 0) {
-      ins.push({
-        icon: '📈',
-        title: `+${diff} leads vs dia anterior`,
-        detail: `Hoje: ${last.total}, ontem: ${prev.total}`,
-        color: 'var(--lc-success)',
-      });
-    } else if (diff < 0 && Math.abs(diff) > 2) {
-      ins.push({
-        icon: '📉',
-        title: `${diff} leads vs dia anterior`,
-        detail: 'Tráfego em queda, checar criativos',
-        color: 'var(--lc-warn)',
-      });
-    }
-  }
-
-  // Insight 3: taxa de qualificação
+  // Insight 2: taxa de qualificação
   if (taxaQualificacao >= 25) {
     ins.push({
       icon: '🎯',
@@ -419,7 +397,7 @@ function generateInsights({ porDia, porFunil, porHora, tempoResposta, taxaQualif
     });
   }
 
-  // Insight 4: top funil
+  // Insight 3: top funil
   const topFunil = [...porFunil].sort((a, b) => b.total - a.total)[0];
   if (topFunil && topFunil.funnel !== 'indefinido') {
     ins.push({
