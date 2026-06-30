@@ -100,16 +100,20 @@ router.get('/metrics', (req, res) => {
     WHERE kind = 'reuniao_agendada'${dfe.clause}
   `).get(...dfe.params)?.c || 0;
 
-  // TIME ASSUMIU: leads distintos que um SDR respondeu (author='sdr') OU que a
-  // Tina passou pro time ("falar agora" / live_handoff).
+  // TIME ASSUMIU: leads distintos que a Tina ENTREGOU pro time ou que o time
+  // pegou. Pega 3 sinais (dedupados): (1) lead em stage handoff/em_atendimento;
+  // (2) evento de handoff (live/publicar/aluno); (3) um SDR respondeu (author=sdr).
+  // O stage é o sinal mais confiável (não depende do webhook OutboundMessage).
   const dfc = dateFilter(req, 'created_at');
   const time_assumiu = db.prepare(`
     SELECT COUNT(DISTINCT cid) as c FROM (
-      SELECT contact_id cid FROM messages   WHERE author = 'sdr'${dfc.clause}
+      SELECT id cid FROM contacts WHERE stage IN ('handoff','em_atendimento') AND ghl_contact_id NOT LIKE 'playground-%'${dfc.clause}
       UNION
-      SELECT contact_id cid FROM events_log WHERE kind = 'live_handoff'${dfc.clause}
+      SELECT contact_id cid FROM events_log WHERE kind IN ('live_handoff','handoff_publicar','handoff_aluno')${dfc.clause}
+      UNION
+      SELECT contact_id cid FROM messages   WHERE author = 'sdr'${dfc.clause}
     )
-  `).get(...dfc.params, ...dfc.params)?.c || 0;
+  `).get(...dfc.params, ...dfc.params, ...dfc.params)?.c || 0;
 
   res.json({ totais, porFunil, custo, porDia, tempoResposta, atendidos, agendados, time_assumiu });
 });

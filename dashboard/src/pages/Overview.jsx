@@ -176,15 +176,13 @@ export default function Overview() {
         <KpiCard
           label="Qualificados"
           value={qualificados}
-          hint={`${taxaQualificacao}% de conversão`}
           spark={porDia.map(d => ({ v: d.qualificados || 0 }))}
           sparkColor="var(--lc-success)"
-          delta={taxaQualificacao >= 20 ? { dir: 'up', value: `${taxaQualificacao}%` } : null}
         />
         <KpiCard
           label="Em atendimento"
           value={emAtendimento}
-          hint="Tina conversando"
+          hint="leads pra a Tina conversar"
           spark={porDia.map(d => ({ v: Math.max(0, (d.total || 0) - (d.qualificados || 0)) }))}
           sparkColor="var(--lc-magenta-600)"
         />
