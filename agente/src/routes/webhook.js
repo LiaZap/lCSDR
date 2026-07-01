@@ -237,7 +237,8 @@ const OWNS_ENTRY_LANE = process.env.TINA_OWNS_ENTRY_LANE === 'true';
 // Mesmo dona da raia, a Tina NÃO sobrescreve um SDR atendendo AGORA: se um consultor
 // conhecido mandou msg nos últimos SDR_ACTIVE_MINUTES (default 15), ela cede o turno.
 // Curto de propósito — se o SDR só deu um opener e sumiu, a Tina assume na hora.
-const SDR_ACTIVE_MS = Math.max(0, Number(process.env.SDR_ACTIVE_MINUTES || 15)) * 60_000;
+const _sdrActiveMin = Number(process.env.SDR_ACTIVE_MINUTES);
+const SDR_ACTIVE_MS = (Number.isFinite(_sdrActiveMin) && _sdrActiveMin > 0 ? _sdrActiveMin : 15) * 60_000;
 
 // Sources que são AUTOMAÇÃO (não atendimento humano), mesmo tendo userId — o
 // GHL carimba o dono do workflow/campanha no userId. Confirmado em prod: msg
@@ -745,14 +746,15 @@ async function handleInbound(event) {
   // atendimento → a Tina não assume. Não atrapalha conversas que ela já toca.
   if (SKIP_IN_ATTENDANCE && !ATTEND_EXCEPT_REENTRADA && !contact.last_outbound_at) {
     if (await conversationAlreadyInAttendance(ghlContactId)) {
-      // EXCEÇÃO: se o TIME colocou o lead na coluna IA Tina (autorização explícita),
-      // OU — com TINA_OWNS_ENTRY_LANE — se o lead está EXCLUSIVAMENTE na raia da Tina
-      // (Funil Orgânico/IA Tina) E nenhum SDR está atendendo AGORA (janela curta), ela
-      // assume IMEDIATO mesmo com um 1º toque antigo de consultor. Se um SDR mandou msg
-      // nos últimos SDR_ACTIVE_MINUTES, a Tina CEDE o turno (não sobrescreve).
-      if (await contactInIaTinaLane(contact)
-          || (OWNS_ENTRY_LANE && await contactExclusivelyInTinaLane(contact)
-              && !(await conversationAlreadyInAttendance(ghlContactId, SDR_ACTIVE_MS)))) {
+      // EXCEÇÃO: a Tina assume IMEDIATO se o lead está na raia dela — coluna IA Tina
+      // (autorização explícita do time) OU, com TINA_OWNS_ENTRY_LANE, EXCLUSIVAMENTE no
+      // Funil Orgânico/IA Tina — MAS, em qualquer dos casos, só se NENHUM SDR estiver
+      // atendendo AGORA: se um consultor mandou msg nos últimos SDR_ACTIVE_MINUTES, a
+      // Tina CEDE o turno (não sobrescreve consultor ativo). O 1º toque antigo (fora
+      // dessa janela curta) não impede a Tina de assumir.
+      if ((await contactInIaTinaLane(contact)
+           || (OWNS_ENTRY_LANE && await contactExclusivelyInTinaLane(contact)))
+          && !(await conversationAlreadyInAttendance(ghlContactId, SDR_ACTIVE_MS))) {
         logger.info({ ghlContactId, contactId: contact.id }, 'lead na raia da Tina (IA Tina/Funil Orgânico) — Tina assume imediato');
         try {
           db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'ia_tina_assume_em_atendimento', ?)`)
