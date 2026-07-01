@@ -40,11 +40,24 @@ for (const t of targets) {
   console.log(`\n════════ ${t} ════════`);
   const local = db.prepare(`SELECT * FROM contacts WHERE name LIKE ? ORDER BY updated_at DESC LIMIT 1`).get(`%${t}%`);
 
+  // 2a) O GHL ENTREGOU o inbound? webhook_InboundMessage é logado ANTES de qualquer
+  // gate (contact_id NULL), então se NÃO existe, o GHL não mandou a mensagem pro
+  // servidor — o problema é a configuração do webhook no GHL (Gabriel), não os gates.
+  const termosBusca = [`%${t}%`];
+  if (local?.phone) { termosBusca.push(`%${local.phone}%`); const d = String(local.phone).replace(/\D/g, ''); if (d) termosBusca.push(`%${d.slice(-8)}%`); }
+  const whClause = termosBusca.map(() => 'payload LIKE ?').join(' OR ');
+  const wh = db.prepare(`SELECT created_at, substr(payload,1,90) p FROM events_log WHERE kind='webhook_InboundMessage' AND (${whClause}) ORDER BY id DESC LIMIT 3`).all(...termosBusca);
+  if (wh.length) {
+    console.log(`  ✅ GHL ENTREGOU o inbound (${wh.length} webhook_InboundMessage): ${wh.map(w => w.created_at).join(', ')}`);
+    console.log('     → o webhook chegou; se não respondeu, foi GATE/LLM/cap (ver abaixo).');
+  } else {
+    console.log('  ⚠️  NENHUM webhook_InboundMessage encontrado pra esse lead.');
+    console.log('     → O GHL provavelmente NÃO está encaminhando as mensagens desse funil/canal pro servidor.');
+    console.log('       (Correção é no GHL — o Workflow/Webhook de InboundMessage — não no código da Tina.)');
+  }
+
   if (!local) {
-    console.log('  ❌ NÃO está no banco local.');
-    console.log('     Como a tag tina-liberada está no GHL, os gates de tag NÃO barrariam ANTES de gravar.');
-    console.log('     → Causa provável: o webhook de InboundMessage do GHL NÃO chegou nesse lead');
-    console.log('       (o GHL não está encaminhando as mensagens desse funil pro servidor).');
+    console.log('  ❌ Também NÃO está no banco local (nunca passou pelo upsert).');
     continue;
   }
 
