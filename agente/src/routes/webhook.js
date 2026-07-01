@@ -227,6 +227,14 @@ const ATTEND_EXCEPT_REENTRADA = process.env.TINA_ATTEND_EXCEPT_REENTRADA === 'tr
 // scripts/listar-stages.js pra pegar os ids dos funis do time).
 const SKIP_REENTRADA_OPP = process.env.SKIP_REENTRADA_OPP !== 'false';
 
+// A Tina é DONA da raia de entrada (Funil Orgânico / IA Tina): responde o lead
+// IMEDIATAMENTE, mesmo que um consultor tenha dado um 1º toque, e REASSUME na hora
+// se ele voltar a mandar msg depois de uma pausa. Ela só larga o lead quando a opp
+// SAI da raia dela (movida pra Proposta/Aguardando/Reentrada/outro pipeline) — aí o
+// time levou o lead adiante de verdade. Opt-in (TINA_OWNS_ENTRY_LANE=true, default
+// off). Guarda: só vale pra lead EXCLUSIVAMENTE na raia (contactExclusivelyInTinaLane).
+const OWNS_ENTRY_LANE = process.env.TINA_OWNS_ENTRY_LANE === 'true';
+
 // Sources que são AUTOMAÇÃO (não atendimento humano), mesmo tendo userId — o
 // GHL carimba o dono do workflow/campanha no userId. Confirmado em prod: msg
 // de workflow vem com userId preenchido.
@@ -330,33 +338,34 @@ async function lastOutboundWasHuman(ghlContactId, localContact) {
   }
 }
 
-// RECLAIM (modo cooldown, opt-in): a Tina REASSUME um lead que foi pausado por um
-// consultor que JÁ SUMIU. Fecha o gap do "handback": sem isso, uma vez pausado
-// (ai_paused=1), o lead ficava travado pra sempre (nada despausa por tempo).
-// Chamado no gate de ai_paused, quando o lead VOLTA a mandar mensagem — então a
-// Tina só responde a uma deixa do próprio lead (nada de outbound proativo aqui).
-// Guardas (todas precisam passar):
-//   1. modo cooldown ligado (SKIP_ATTENDANCE_HOURS>0);
-//   2. lead NÃO genuinamente fechado (desqualificado/agendado/qualificado);
-//   3. NENHUM humano ativo na janela agora (conversationAlreadyInAttendance);
-//   4. o lead está EXCLUSIVAMENTE na raia da Tina (TODAS as opps abertas em Funil
-//      Orgânico / IA Tina) — se houver QUALQUER negócio vivo em outra coluna
-//      (Proposta/Follow Up/outro pipeline/Reentrada), NÃO reassume (multi-opp: não
-//      rouba lead que um closer está tocando).
-// Retorna true se despausou (aí o fluxo segue e responde este inbound).
-async function maybeReclaimFromIdleHuman(fresh, ghlContactId) {
-  if (ATTENDANCE_HOURS <= 0) return false;
+// RECLAIM: a Tina REASSUME um lead que foi pausado por um consultor (ai_paused=1).
+// Fecha o gap do "handback": sem isso, uma vez pausado, o lead ficava travado pra
+// sempre. Chamado no gate de ai_paused, quando o lead VOLTA a mandar mensagem —
+// então a Tina só responde a uma deixa do próprio lead (nada de outbound proativo).
+// Guardas SEMPRE exigidas:
+//   - lead NÃO genuinamente fechado (desqualificado/agendado/qualificado);
+//   - lead EXCLUSIVAMENTE na raia da Tina (TODAS as opps abertas em Funil Orgânico/
+//     IA Tina) — se houver QUALQUER negócio vivo em outra coluna (Proposta/Follow Up/
+//     outro pipeline/Reentrada) NÃO reassume (multi-opp: não rouba lead de closer).
+// Quando reassume:
+//   - TINA_OWNS_ENTRY_LANE: IMEDIATO (a Tina é dona da raia; não espera o consultor
+//     sumir — ela responde na hora). É o modo que a LC quer pro Funil Orgânico.
+//   - senão (modo cooldown SKIP_ATTENDANCE_HOURS): só reassume se NENHUM humano
+//     estiver ativo na janela (consultor "sumiu").
+async function maybeReclaimLead(fresh, ghlContactId) {
+  if (!OWNS_ENTRY_LANE && ATTENDANCE_HOURS <= 0) return false;               // feature desligada
   if (['desqualificado', 'agendado', 'qualificado'].includes(fresh.stage)) return false;
-  if (await conversationAlreadyInAttendance(ghlContactId)) return false;   // humano ativo na janela
-  if (!(await contactExclusivelyInTinaLane(fresh))) return false;          // tem negócio vivo fora da raia
-  resumeIA(fresh.id, 'consultor_sumiu_reclaim');
+  if (!(await contactExclusivelyInTinaLane(fresh))) return false;            // negócio vivo fora da raia
+  // Modo cooldown (sem "dono da raia"): respeita a janela — só se o consultor sumiu.
+  if (!OWNS_ENTRY_LANE && await conversationAlreadyInAttendance(ghlContactId)) return false;
+  resumeIA(fresh.id, OWNS_ENTRY_LANE ? 'raia_tina_reassume' : 'consultor_sumiu_reclaim');
   // Volta o lead pro fluxo de qualificação (estava 'handoff' por causa da pausa).
   db.prepare(`UPDATE contacts SET stage = CASE WHEN stage IN ('handoff','em_atendimento') THEN 'pre_qualificando' ELSE stage END WHERE id = ?`).run(fresh.id);
   try {
-    db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'ia_reclaim_humano_idle', ?)`)
-      .run(fresh.id, JSON.stringify({ ghlContactId }));
+    db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'ia_reclaim_lead', ?)`)
+      .run(fresh.id, JSON.stringify({ ghlContactId, mode: OWNS_ENTRY_LANE ? 'owns_lane' : 'cooldown' }));
   } catch {}
-  logger.info({ contactId: fresh.id, ghlContactId }, 'consultor sumiu > janela e lead na raia da Tina — Tina reassume');
+  logger.info({ contactId: fresh.id, ghlContactId, ownsLane: OWNS_ENTRY_LANE }, 'lead na raia da Tina — Tina reassume');
   return true;
 }
 
@@ -730,11 +739,12 @@ async function handleInbound(event) {
   // atendimento → a Tina não assume. Não atrapalha conversas que ela já toca.
   if (SKIP_IN_ATTENDANCE && !ATTEND_EXCEPT_REENTRADA && !contact.last_outbound_at) {
     if (await conversationAlreadyInAttendance(ghlContactId)) {
-      // EXCEÇÃO: se o TIME colocou o lead na coluna IA Tina, isso É a autorização
-      // pra Tina assumir — ela responde e qualifica mesmo com histórico de humano
-      // (foi o caso reportado: time move o lead pra IA Tina pra ela continuar).
-      if (await contactInIaTinaLane(contact)) {
-        logger.info({ ghlContactId, contactId: contact.id }, 'lead com histórico de humano MAS na coluna IA Tina — Tina assume (time delegou)');
+      // EXCEÇÃO: se o TIME colocou o lead na coluna IA Tina (autorização explícita),
+      // OU — com TINA_OWNS_ENTRY_LANE — se o lead está EXCLUSIVAMENTE na raia da Tina
+      // (Funil Orgânico/IA Tina), ela assume IMEDIATO mesmo com um toque de consultor:
+      // ela é a dona desse funil, responde na hora (o consultor não deveria dar 1º toque aqui).
+      if (await contactInIaTinaLane(contact) || (OWNS_ENTRY_LANE && await contactExclusivelyInTinaLane(contact))) {
+        logger.info({ ghlContactId, contactId: contact.id }, 'lead na raia da Tina (IA Tina/Funil Orgânico) — Tina assume imediato');
         try {
           db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'ia_tina_assume_em_atendimento', ?)`)
             .run(contact.id, JSON.stringify({ ghlContactId }));
@@ -909,7 +919,7 @@ async function handleInbound(event) {
     // REASSUMIR (consultor sumiu > janela e lead ainda na raia dela). Nesse caso
     // despausa e segue pro fluxo normal pra responder ESTE inbound do lead.
     if (fresh.ai_paused) {
-      if (await maybeReclaimFromIdleHuman(fresh, ghlContactId)) {
+      if (await maybeReclaimLead(fresh, ghlContactId)) {
         Object.assign(fresh, db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id));
       } else {
         logger.info({ contactId: contact.id }, 'IA pausada, registrando sem responder');
