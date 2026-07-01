@@ -234,6 +234,10 @@ const SKIP_REENTRADA_OPP = process.env.SKIP_REENTRADA_OPP !== 'false';
 // time levou o lead adiante de verdade. Opt-in (TINA_OWNS_ENTRY_LANE=true, default
 // off). Guarda: só vale pra lead EXCLUSIVAMENTE na raia (contactExclusivelyInTinaLane).
 const OWNS_ENTRY_LANE = process.env.TINA_OWNS_ENTRY_LANE === 'true';
+// Mesmo dona da raia, a Tina NÃO sobrescreve um SDR atendendo AGORA: se um consultor
+// conhecido mandou msg nos últimos SDR_ACTIVE_MINUTES (default 15), ela cede o turno.
+// Curto de propósito — se o SDR só deu um opener e sumiu, a Tina assume na hora.
+const SDR_ACTIVE_MS = Math.max(0, Number(process.env.SDR_ACTIVE_MINUTES || 15)) * 60_000;
 
 // Sources que são AUTOMAÇÃO (não atendimento humano), mesmo tendo userId — o
 // GHL carimba o dono do workflow/campanha no userId. Confirmado em prod: msg
@@ -245,7 +249,7 @@ const AUTO_SOURCES = new Set(['workflow', 'campaign', 'bulk_actions', 'bulk', 'a
 // API sempre vem com userId NULL). Excluímos sources de automação (workflow/
 // campanha), que também trazem userId. Saídas antigas (fora da janela) não
 // contam — lead esfriou e a Tina pode reabordar.
-async function conversationAlreadyInAttendance(ghlContactId) {
+async function conversationAlreadyInAttendance(ghlContactId, windowMs) {
   if (!process.env.GHL_API_TOKEN) return false;
   try {
     const convResp = await GHL.searchConversations(ghlContactId);
@@ -254,7 +258,7 @@ async function conversationAlreadyInAttendance(ghlContactId) {
     const msgsResp = await GHL.getMessages(conv.id, { limit: 25 });
     const msgs = msgsResp?.messages?.messages || msgsResp?.messages || msgsResp || [];
     if (!Array.isArray(msgs) || !msgs.length) return false;
-    const win = humanActiveWindowMs();
+    const win = windowMs != null ? windowMs : humanActiveWindowMs();
     const limiteMs = win > 0 ? Date.now() - win : 0;
     return msgs.some(m => {
       const dir = (m.direction || '').toLowerCase();
@@ -356,8 +360,10 @@ async function maybeReclaimLead(fresh, ghlContactId) {
   if (!OWNS_ENTRY_LANE && ATTENDANCE_HOURS <= 0) return false;               // feature desligada
   if (['desqualificado', 'agendado', 'qualificado'].includes(fresh.stage)) return false;
   if (!(await contactExclusivelyInTinaLane(fresh))) return false;            // negócio vivo fora da raia
-  // Modo cooldown (sem "dono da raia"): respeita a janela — só se o consultor sumiu.
-  if (!OWNS_ENTRY_LANE && await conversationAlreadyInAttendance(ghlContactId)) return false;
+  // NÃO sobrescreve SDR ativo: cede se um consultor mandou msg dentro da janela.
+  // Dono da raia → janela CURTA (SDR ativo AGORA); cooldown → janela longa (SDR sumiu).
+  const activeWin = OWNS_ENTRY_LANE ? SDR_ACTIVE_MS : humanActiveWindowMs();
+  if (await conversationAlreadyInAttendance(ghlContactId, activeWin)) return false;
   resumeIA(fresh.id, OWNS_ENTRY_LANE ? 'raia_tina_reassume' : 'consultor_sumiu_reclaim');
   // Volta o lead pro fluxo de qualificação (estava 'handoff' por causa da pausa).
   db.prepare(`UPDATE contacts SET stage = CASE WHEN stage IN ('handoff','em_atendimento') THEN 'pre_qualificando' ELSE stage END WHERE id = ?`).run(fresh.id);
@@ -741,9 +747,12 @@ async function handleInbound(event) {
     if (await conversationAlreadyInAttendance(ghlContactId)) {
       // EXCEÇÃO: se o TIME colocou o lead na coluna IA Tina (autorização explícita),
       // OU — com TINA_OWNS_ENTRY_LANE — se o lead está EXCLUSIVAMENTE na raia da Tina
-      // (Funil Orgânico/IA Tina), ela assume IMEDIATO mesmo com um toque de consultor:
-      // ela é a dona desse funil, responde na hora (o consultor não deveria dar 1º toque aqui).
-      if (await contactInIaTinaLane(contact) || (OWNS_ENTRY_LANE && await contactExclusivelyInTinaLane(contact))) {
+      // (Funil Orgânico/IA Tina) E nenhum SDR está atendendo AGORA (janela curta), ela
+      // assume IMEDIATO mesmo com um 1º toque antigo de consultor. Se um SDR mandou msg
+      // nos últimos SDR_ACTIVE_MINUTES, a Tina CEDE o turno (não sobrescreve).
+      if (await contactInIaTinaLane(contact)
+          || (OWNS_ENTRY_LANE && await contactExclusivelyInTinaLane(contact)
+              && !(await conversationAlreadyInAttendance(ghlContactId, SDR_ACTIVE_MS)))) {
         logger.info({ ghlContactId, contactId: contact.id }, 'lead na raia da Tina (IA Tina/Funil Orgânico) — Tina assume imediato');
         try {
           db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'ia_tina_assume_em_atendimento', ?)`)
