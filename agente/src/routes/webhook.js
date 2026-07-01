@@ -11,7 +11,7 @@ import { generateTinaReply } from '../agent/tina.js';
 import { describeImageBuffer } from '../agent/tina-gemini.js';
 import { sendSequence, sendText, preferredChannel } from '../agent/messenger.js';
 import {
-  pauseIA, scheduleFollowup, handleSDRReply,
+  pauseIA, resumeIA, scheduleFollowup, handleSDRReply,
   markQualifiedAndHandoff, markDisqualified, applyTinaTags,
 } from '../agent/handoff.js';
 import {
@@ -19,7 +19,7 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane, contactOppInReentrada, contactWorkedByOtherTeam } from '../ghl/opportunities.js';
+import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane, contactOppInReentrada, contactWorkedByOtherTeam, contactExclusivelyInTinaLane } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff, notifyIaTinaForaJanela } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
@@ -195,6 +195,18 @@ const SKIP_IN_ATTENDANCE = process.env.SKIP_LEADS_IN_ATTENDANCE !== 'false';
 // Evita bloquear lead FRIO antigo (humano falou há meses, lead sumiu e voltou —
 // é oportunidade nova pra Tina). Configurável; 0/negativo = sem janela (qualquer idade).
 const ATTENDANCE_DAYS = Number(process.env.SKIP_ATTENDANCE_DAYS || 30);
+// Janela em HORAS pra considerar um humano "atendendo AGORA" (opt-in). Se setada
+// (>0), tem PRECEDÊNCIA sobre SKIP_ATTENDANCE_DAYS: um consultor que falou há MAIS
+// que isso é tratado como "largou o lead" → a Tina assume o atendimento. Se ele
+// voltar a responder DENTRO da janela, a Tina pausa de novo (handback — precisa
+// AUTO_HUMAN_DETECTION_ENABLED=true). Ex.: SKIP_ATTENDANCE_HOURS=2.
+const ATTENDANCE_HOURS = Number(process.env.SKIP_ATTENDANCE_HOURS || 0);
+// Janela (ms) em que uma saída de humano ainda conta como "atendendo agora".
+// Horas têm precedência; senão cai nos dias (default 30). 0 = sem janela.
+function humanActiveWindowMs() {
+  if (ATTENDANCE_HOURS > 0) return ATTENDANCE_HOURS * 3600_000;
+  return ATTENDANCE_DAYS > 0 ? ATTENDANCE_DAYS * 864e5 : 0;
+}
 
 // MODO "atende TODOS menos Reentrada" (leads de anúncio caem no Funil Orgânico e
 // a Tina precisa atender + mover pra coluna dela). Quando ON: ignora o whitelist
@@ -234,7 +246,8 @@ async function conversationAlreadyInAttendance(ghlContactId) {
     const msgsResp = await GHL.getMessages(conv.id, { limit: 25 });
     const msgs = msgsResp?.messages?.messages || msgsResp?.messages || msgsResp || [];
     if (!Array.isArray(msgs) || !msgs.length) return false;
-    const limiteMs = ATTENDANCE_DAYS > 0 ? Date.now() - ATTENDANCE_DAYS * 864e5 : 0;
+    const win = humanActiveWindowMs();
+    const limiteMs = win > 0 ? Date.now() - win : 0;
     return msgs.some(m => {
       const dir = (m.direction || '').toLowerCase();
       const uid = m.userId || m.user_id || m.sentBy?.id;
@@ -288,6 +301,18 @@ async function lastOutboundWasHuman(ghlContactId, localContact) {
       return false;
     }
 
+    // Recência (modo cooldown, opt-in via SKIP_ATTENDANCE_HOURS): se o consultor
+    // conhecido falou há MAIS que a janela ativa, ele "largou" o lead → a Tina
+    // assume (não pausa). Só pausa se a última fala dele foi recente (handback).
+    // Sem SKIP_ATTENDANCE_HOURS, mantém o comportamento antigo (pausa por qualquer idade).
+    if (ATTENDANCE_HOURS > 0) {
+      const outTs = new Date(lastOut.dateAdded || lastOut.createdAt || 0).getTime();
+      if (outTs && (Date.now() - outTs) > ATTENDANCE_HOURS * 3600_000) {
+        logger.debug({ ghlContactId, outTs }, 'consultor falou fora da janela ativa — Tina assume');
+        return false;
+      }
+    }
+
     // Sanity 2: outbound do GHL é mais nova que nossa última outbound?
     // Se o timestamp do GHL é igual/menor ao nosso last_outbound_at + 5s,
     // foi a Tina mesmo que enviou.
@@ -303,6 +328,36 @@ async function lastOutboundWasHuman(ghlContactId, localContact) {
     logger.warn({ err: err.message, ghlContactId }, 'falha checando última mensagem; segue sem pausar');
     return false;
   }
+}
+
+// RECLAIM (modo cooldown, opt-in): a Tina REASSUME um lead que foi pausado por um
+// consultor que JÁ SUMIU. Fecha o gap do "handback": sem isso, uma vez pausado
+// (ai_paused=1), o lead ficava travado pra sempre (nada despausa por tempo).
+// Chamado no gate de ai_paused, quando o lead VOLTA a mandar mensagem — então a
+// Tina só responde a uma deixa do próprio lead (nada de outbound proativo aqui).
+// Guardas (todas precisam passar):
+//   1. modo cooldown ligado (SKIP_ATTENDANCE_HOURS>0);
+//   2. lead NÃO genuinamente fechado (desqualificado/agendado/qualificado);
+//   3. NENHUM humano ativo na janela agora (conversationAlreadyInAttendance);
+//   4. o lead está EXCLUSIVAMENTE na raia da Tina (TODAS as opps abertas em Funil
+//      Orgânico / IA Tina) — se houver QUALQUER negócio vivo em outra coluna
+//      (Proposta/Follow Up/outro pipeline/Reentrada), NÃO reassume (multi-opp: não
+//      rouba lead que um closer está tocando).
+// Retorna true se despausou (aí o fluxo segue e responde este inbound).
+async function maybeReclaimFromIdleHuman(fresh, ghlContactId) {
+  if (ATTENDANCE_HOURS <= 0) return false;
+  if (['desqualificado', 'agendado', 'qualificado'].includes(fresh.stage)) return false;
+  if (await conversationAlreadyInAttendance(ghlContactId)) return false;   // humano ativo na janela
+  if (!(await contactExclusivelyInTinaLane(fresh))) return false;          // tem negócio vivo fora da raia
+  resumeIA(fresh.id, 'consultor_sumiu_reclaim');
+  // Volta o lead pro fluxo de qualificação (estava 'handoff' por causa da pausa).
+  db.prepare(`UPDATE contacts SET stage = CASE WHEN stage IN ('handoff','em_atendimento') THEN 'pre_qualificando' ELSE stage END WHERE id = ?`).run(fresh.id);
+  try {
+    db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'ia_reclaim_humano_idle', ?)`)
+      .run(fresh.id, JSON.stringify({ ghlContactId }));
+  } catch {}
+  logger.info({ contactId: fresh.id, ghlContactId }, 'consultor sumiu > janela e lead na raia da Tina — Tina reassume');
+  return true;
 }
 
 // =====================================================================
@@ -850,11 +905,17 @@ async function handleInbound(event) {
     const fresh = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id);
     if (!fresh) return;
 
-    // 3) Se IA está pausada (SDR assumiu), só registra
+    // 3) Se IA está pausada (SDR assumiu), só registra — A MENOS que a Tina possa
+    // REASSUMIR (consultor sumiu > janela e lead ainda na raia dela). Nesse caso
+    // despausa e segue pro fluxo normal pra responder ESTE inbound do lead.
     if (fresh.ai_paused) {
-      logger.info({ contactId: contact.id }, 'IA pausada, registrando sem responder');
-      scheduleFollowup(contact.id, 'silencio_sdr');
-      return;
+      if (await maybeReclaimFromIdleHuman(fresh, ghlContactId)) {
+        Object.assign(fresh, db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id));
+      } else {
+        logger.info({ contactId: contact.id }, 'IA pausada, registrando sem responder');
+        scheduleFollowup(contact.id, 'silencio_sdr');
+        return;
+      }
     }
 
     // 4) Proteção de custo

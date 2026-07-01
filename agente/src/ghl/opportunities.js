@@ -153,6 +153,32 @@ export async function contactInIaTinaLane(contact) {
   }
 }
 
+// Lead está EXCLUSIVAMENTE na raia da Tina? True SÓ se (a) tem pelo menos uma opp
+// ABERTA e (b) TODAS as opps abertas estão numa stage que a Tina é dona (IA Tina +
+// Funil Orgânico, por padrão). Basta UMA opp aberta fora da raia (outro pipeline,
+// Reentrada, ou stage do time no mesmo pipeline — Proposta/Follow Up/Aplicação...)
+// pra dar false. É a guarda do RECLAIM: a Tina só reassume um lead que sumiu do radar
+// do time se ele NÃO tem nenhum negócio vivo em outra coluna (senão roubaria um lead
+// que um closer está tocando — caso multi-opp). Configurável por GHL_TINA_OWNED_STAGES
+// (CSV de stageIds). Falha FECHADO (erro → false → não reassume; lado seguro).
+export async function contactExclusivelyInTinaLane(contact) {
+  if (!contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return false;
+  const { stageIaTina } = resolvePipeline();
+  const extra = (process.env.GHL_TINA_OWNED_STAGES
+    || 'd596db34-ada4-4e7a-936a-943a9410d9a6') // Funil Orgânico (Pré-Vendas LCA)
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const owned = new Set([stageIaTina, ...extra].filter(Boolean));
+  try {
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
+    const open = (r?.opportunities || (Array.isArray(r) ? r : []))
+      .filter(o => String(o.status || 'open').toLowerCase() === 'open');
+    if (!open.length) return false;                        // sem opp aberta → não reassume
+    return open.every(o => owned.has(o.pipelineStageId));  // TODAS na raia da Tina
+  } catch {
+    return false;
+  }
+}
+
 // Lead tem opp ABERTA numa stage de REENTRADA (o time está re-trabalhando ele)?
 // Usado pelo modo "atende todos menos Reentrada" pra a Tina NÃO assumir esses.
 // Falha ABERTO (erro → false → atende; não bloqueia atendimento por falha de API).
