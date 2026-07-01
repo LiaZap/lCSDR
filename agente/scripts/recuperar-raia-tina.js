@@ -24,13 +24,22 @@ import { contactExclusivelyInTinaLane } from '../src/ghl/opportunities.js';
 
 const SEND = process.argv.includes('--send');
 const HOURS = Number(process.argv.find(a => /^\d+$/.test(a)) || process.env.RECUP_HORAS || 24);
-const SDR_ACTIVE_MIN = Math.max(1, Number(process.env.SDR_ACTIVE_MINUTES) || 15);
+// Janela "SDR ativo": mesma regra do webhook (default 12h; SDR_ACTIVE_HOURS ou
+// SDR_ACTIVE_MINUTES sobrescrevem). Se um consultor mandou msg dentro dela, pula.
+const _sdrMin = Number(process.env.SDR_ACTIVE_MINUTES);
+const _sdrHrs = Number(process.env.SDR_ACTIVE_HOURS);
+const SDR_ACTIVE_MS =
+  (Number.isFinite(_sdrMin) && _sdrMin > 0) ? _sdrMin * 60_000
+  : (Number.isFinite(_sdrHrs) && _sdrHrs > 0) ? _sdrHrs * 3_600_000
+  : 12 * 3_600_000;
+const SDR_ACTIVE_LABEL = SDR_ACTIVE_MS >= 3_600_000 ? `${SDR_ACTIVE_MS / 3_600_000}h` : `${Math.round(SDR_ACTIVE_MS / 60_000)}min`;
 const DELAY_MS = Number(process.env.RECUP_DELAY_MS || 5000);
 const AUTO = new Set(['workflow', 'campaign', 'bulk_actions', 'bulk', 'automation']);
 
-// SDR mandou msg nos últimos SDR_ACTIVE_MIN min? (janela curta = "atendendo agora").
-// Olha direto no GHL (cobre o caso do webhook OutboundMessage não estar ligado).
-// Humano = outbound com userId e source != automação. Falha FECHADO (erro → true → pula).
+// SDR mandou msg dentro da janela de "SDR ativo" (default 12h)? Se sim, o consultor
+// ainda pode estar tocando o lead → pula. Olha direto no GHL (cobre o webhook
+// OutboundMessage desligado). Humano = outbound com userId e source != automação.
+// Falha FECHADO (erro → true → pula, pra nunca atropelar humano).
 async function sdrAtivoAgora(ghlId) {
   try {
     const cv = await GHL.searchConversations(ghlId);
@@ -38,7 +47,7 @@ async function sdrAtivoAgora(ghlId) {
     if (!conv?.id) return false;
     const m = await GHL.getMessages(conv.id, { limit: 20 });
     const ms = m?.messages?.messages || m?.messages || m || [];
-    const limite = Date.now() - SDR_ACTIVE_MIN * 60 * 1000;
+    const limite = Date.now() - SDR_ACTIVE_MS;
     return ms.some(x => {
       if (String(x.direction || '').toLowerCase() !== 'outbound') return false;
       const uid = x.userId || x.user_id || x.sentBy?.id;
@@ -78,7 +87,7 @@ for (const r of rows) {
     foraRaia++; continue;
   }
   if (await sdrAtivoAgora(r.g)) {
-    console.log(`  ⏭️  ${nome} | SDR ativo (${SDR_ACTIVE_MIN}min) — não sobrescreve`);
+    console.log(`  ⏭️  ${nome} | SDR ativo (${SDR_ACTIVE_LABEL}) — não sobrescreve`);
     sdrAtivo++; continue;
   }
   if (SEND) {

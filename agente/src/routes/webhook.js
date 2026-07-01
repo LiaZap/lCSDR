@@ -234,11 +234,17 @@ const SKIP_REENTRADA_OPP = process.env.SKIP_REENTRADA_OPP !== 'false';
 // time levou o lead adiante de verdade. Opt-in (TINA_OWNS_ENTRY_LANE=true, default
 // off). Guarda: só vale pra lead EXCLUSIVAMENTE na raia (contactExclusivelyInTinaLane).
 const OWNS_ENTRY_LANE = process.env.TINA_OWNS_ENTRY_LANE === 'true';
-// Mesmo dona da raia, a Tina NÃO sobrescreve um SDR atendendo AGORA: se um consultor
-// conhecido mandou msg nos últimos SDR_ACTIVE_MINUTES (default 15), ela cede o turno.
-// Curto de propósito — se o SDR só deu um opener e sumiu, a Tina assume na hora.
-const _sdrActiveMin = Number(process.env.SDR_ACTIVE_MINUTES);
-const SDR_ACTIVE_MS = (Number.isFinite(_sdrActiveMin) && _sdrActiveMin > 0 ? _sdrActiveMin : 15) * 60_000;
+// Mesmo dona da raia, a Tina NÃO sobrescreve um consultor que ESTÁ atendendo: se um
+// SDR mandou msg dentro da "janela de SDR ativo", ela cede. Default 12h — se o
+// consultor realmente mandou mensagem, dá tempo dele tocar; só depois desse tempo de
+// silêncio dele a Tina assume. Lead SEM nenhum toque de consultor → Tina responde na
+// hora. Configurável: SDR_ACTIVE_HOURS (horas) ou SDR_ACTIVE_MINUTES (min, precede).
+const _sdrMin = Number(process.env.SDR_ACTIVE_MINUTES);
+const _sdrHrs = Number(process.env.SDR_ACTIVE_HOURS);
+const SDR_ACTIVE_MS =
+  (Number.isFinite(_sdrMin) && _sdrMin > 0) ? _sdrMin * 60_000
+  : (Number.isFinite(_sdrHrs) && _sdrHrs > 0) ? _sdrHrs * 3_600_000
+  : 12 * 3_600_000; // default 12h
 
 // Sources que são AUTOMAÇÃO (não atendimento humano), mesmo tendo userId — o
 // GHL carimba o dono do workflow/campanha no userId. Confirmado em prod: msg
