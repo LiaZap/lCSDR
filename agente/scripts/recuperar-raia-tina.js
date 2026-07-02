@@ -59,6 +59,28 @@ async function sdrAtivoAgora(ghlId) {
   } catch { return true; } // na dúvida, PULA (não atropela humano)
 }
 
+// Diagnóstico (dry-run): mostra em QUAL funil/coluna o lead está, pra decidir se o
+// pulo "fora da raia" foi certo (coluna do time) ou se é um funil de entrada que a
+// Tina deveria pegar (aí é só somar o stageId em GHL_TINA_OWNED_STAGES).
+const PVL = 'MfDNcFdH03j0ZBuwJDYM'; // Pré-Vendas LCA (SDR)
+const STAGE_NAMES = {
+  'b661d5f1-69cd-4531-8be9-79b3e11c862f': 'Reentrada', '74164182-d3b0-447b-a761-3bdcd6d47eac': 'IA Tina',
+  '93eea3c5-dce9-4be0-bbd2-076e8d81308d': 'Follow Up', '568d2055-fb2c-4b47-9b40-fbe7dab084fb': 'Funil de Aplicação LCA',
+  '0c040fa3-3ed5-449f-ab07-c7b3fb40f97c': 'Aguardando Atendimento', '9e03622b-2483-4215-b374-8adc1cf59b83': 'Funil DNA Best-Seller',
+  'd596db34-ada4-4e7a-936a-943a9410d9a6': 'Funil Orgânico', '78bd7ebd-1b01-4326-8571-a13c69f906a2': 'Funil WhatsApp',
+  'a79b9e1f-9ebd-48c9-976c-e2ebd3503317': 'Funil Hotmart', 'f65819a0-47fd-48a0-bc1a-bd038a01947c': 'Funil Social Selling',
+  '09971fb3-e052-486e-8817-351b33849710': 'Funis de Aquisição', '53e5b454-d467-4f48-a34f-c9995452f72b': 'Funil Arquitetos do livro',
+  '0f1d73ec-4e43-4ba4-aa30-7b1f2dae18b0': 'Proposta Enviada',
+};
+async function oppStagesLabel(ghlId) {
+  try {
+    const r = await GHL.getOpportunitiesByContact(ghlId);
+    const ops = (r?.opportunities || (Array.isArray(r) ? r : [])).filter(o => String(o.status || 'open').toLowerCase() === 'open');
+    if (!ops.length) return '(sem opp aberta)';
+    return ops.map(o => o.pipelineId && o.pipelineId !== PVL ? '(outro pipeline)' : (STAGE_NAMES[o.pipelineStageId] || `stage:${String(o.pipelineStageId || '').slice(-6)}`)).join(' + ');
+  } catch { return '(erro)'; }
+}
+
 // Leads cujo ÚLTIMO movimento foi msg do lead (inbound sem resposta), dentro de N
 // horas. INCLUI pausados (ai_paused=1). Fecha fora desqualificado/agendado/qualificado.
 const rows = db.prepare(`
@@ -83,7 +105,8 @@ let resp = 0, foraRaia = 0, sdrAtivo = 0;
 for (const r of rows) {
   const nome = (r.name || r.g).slice(0, 26).padEnd(26);
   if (!(await contactExclusivelyInTinaLane({ id: r.id, ghl_contact_id: r.g }))) {
-    console.log(`  ⏭️  ${nome} | fora da raia da Tina (negócio vivo em outra coluna)`);
+    const detalhe = SEND ? '' : ` — está em: ${await oppStagesLabel(r.g)}`;
+    console.log(`  ⏭️  ${nome} | fora da raia da Tina${detalhe}`);
     foraRaia++; continue;
   }
   if (await sdrAtivoAgora(r.g)) {
