@@ -1133,22 +1133,20 @@ async function handleInbound(event) {
       await markDisqualified(fresh, result);
 
     } else {
-      // Tina ainda qualificando: se JÁ identificou o funil, coloca o lead na
-      // coluna "IA Tina" (raia dela). Com a detecção de humano LIGADA, a Tina só
-      // chega aqui em leads que NENHUM consultor está atendendo → seguro MOVER a
-      // opp pra IA Tina (claimToIaTina, dentro do pipeline dela). Sem a detecção,
-      // só CRIA pra lead novo (moveLeadToIaTina) pra não roubar lead do time.
-      // Move pra coluna IA Tina + marca a tag dela. No modo "atende todos menos
-      // Reentrada", move já no 1º contato (NÃO espera classificar o funil) — é o
-      // "puxar pra IA Tina" que o time pediu. O guard de Reentrada/opp-fechada no
-      // claimToIaTina protege.
-      if (ATTEND_EXCEPT_REENTRADA || result.funnel || fresh.funnel) {
-        if (ATTEND_EXCEPT_REENTRADA || AUTO_HUMAN_DETECTION) await claimToIaTina(fresh).catch(() => {});
+      // Tina atendendo → PUXA o lead pra coluna "IA Tina" (raia dela), pro time ver
+      // quem ela está tocando. Com TINA_OWNS_ENTRY_LANE ou detecção de humano LIGADA
+      // (ou modo atende-menos-Reentrada), MOVE a opp existente (claimToIaTina) já no
+      // 1º contato, sem esperar classificar o funil — é o "puxar pra IA Tina" que o
+      // time pediu. Sem esses modos, só CRIA pra lead novo com funil (moveLeadToIaTina)
+      // pra não roubar lead do time. O guard de Reentrada/outro-pipeline/opp-fechada
+      // dentro do claimToIaTina protege (nunca puxa lead que o time está tocando).
+      if (ATTEND_EXCEPT_REENTRADA || OWNS_ENTRY_LANE || result.funnel || fresh.funnel) {
+        if (ATTEND_EXCEPT_REENTRADA || OWNS_ENTRY_LANE || AUTO_HUMAN_DETECTION) await claimToIaTina(fresh).catch(() => {});
         else await moveLeadToIaTina(fresh).catch(() => {});
         // Tagueia o lead como "da Tina" (tina-liberada) ao assumir — marcador pra
         // ele ser reconhecido como dela nas próximas mensagens. Idempotente: só a
         // 1ª vez (nas próximas, `tags` já inclui a tag e pula).
-        if (ATTEND_EXCEPT_REENTRADA && REQUIRED_TAG_ENABLED && !tags.includes(REQUIRED_TAG)) {
+        if ((ATTEND_EXCEPT_REENTRADA || OWNS_ENTRY_LANE) && REQUIRED_TAG_ENABLED && !tags.includes(REQUIRED_TAG)) {
           await GHL.addTag(ghlContactId, REQUIRED_TAG).catch(() => {});
         }
       }
