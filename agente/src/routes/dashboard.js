@@ -326,7 +326,7 @@ router.post('/contacts/:id/send', async (req, res) => {
     await GHL.sendMessage({
       contactId: contact.ghl_contact_id,
       message,
-      type: 'WhatsApp',
+      type: process.env.GHL_OUTBOUND_TYPE || 'WhatsApp', // mesmo canal da Tina (SMS/WhatsApp)
     });
     recordOutbound(contact.id, { author: 'sdr', content: message, sdr_id: req.user.id });
     pauseIA(contact.id, 'sdr_enviou_via_dashboard');

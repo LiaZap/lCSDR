@@ -52,7 +52,7 @@ async function processFollowups() {
       await GHL.sendMessage({
         contactId: f.ghl_contact_id,
         message: txt,
-        type: 'WhatsApp',
+        type: process.env.GHL_OUTBOUND_TYPE || 'WhatsApp', // mesmo canal da Tina (SMS/WhatsApp)
       });
       recordOutbound(f.contact_id, { author: 'ia', content: txt });
       db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'followup_sent', ?)`)
