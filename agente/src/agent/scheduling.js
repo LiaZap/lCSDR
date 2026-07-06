@@ -26,6 +26,25 @@ const SLOT_MINUTES = Number(process.env.GHL_SLOT_MINUTES || 30);
 const LOOKAHEAD_DAYS = Number(process.env.GHL_SLOT_LOOKAHEAD_DAYS || 5);
 const TIMEZONE = process.env.GHL_TIMEZONE || 'America/Sao_Paulo';
 
+// TRAVA de horário comercial: a Tina só oferece/agenda slots DENTRO desta faixa
+// (hora local BRT). O free-slots do GHL às vezes devolve horários FORA do expediente
+// (ex.: 19h–23h30 por config de fuso/disponibilidade errada no calendário) — sem esta
+// trava a Tina agendava de madrugada. Default 9h–18h. Config: SCHEDULING_HOUR_MIN /
+// SCHEDULING_HOUR_MAX (0-24). Se MIN >= MAX (inválido), a trava fica DESLIGADA.
+const SCHED_HOUR_MIN = Number(process.env.SCHEDULING_HOUR_MIN ?? 9);
+const SCHED_HOUR_MAX = Number(process.env.SCHEDULING_HOUR_MAX ?? 18);
+function slotHourBRT(iso) {
+  try {
+    return Number(new Intl.DateTimeFormat('pt-BR', { timeZone: TIMEZONE, hour: 'numeric', hourCycle: 'h23' }).format(new Date(iso)));
+  } catch { return new Date(iso).getHours(); }
+}
+// True se o slot COMEÇA dentro do expediente. Trava desligada/ inválida → sempre true.
+function withinBusinessHours(iso) {
+  if (!Number.isFinite(SCHED_HOUR_MIN) || !Number.isFinite(SCHED_HOUR_MAX) || SCHED_HOUR_MIN >= SCHED_HOUR_MAX) return true;
+  const h = slotHourBRT(iso);
+  return h >= SCHED_HOUR_MIN && h < SCHED_HOUR_MAX;
+}
+
 // Lista de calendários (closers). Aceita GHL_CALENDAR_IDS (CSV) ou GHL_CALENDAR_ID (único).
 export function getCalendarIds() {
   const multi = (process.env.GHL_CALENDAR_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -122,6 +141,7 @@ export async function getNextSlots(count = 3, { fromDate = new Date(), spread = 
     if (r.status !== 'fulfilled') { logger.warn({ err: r.reason?.message }, 'falha ao puxar free-slots de um calendário'); continue; }
     const list = r.value.isos
       .filter(iso => new Date(iso).getTime() > fromDate.getTime())
+      .filter(withinBusinessHours)   // ignora slots fora do expediente que o GHL retorna
       .sort()
       .map(iso => ({ iso, calendarId: r.value.calendarId }));
     if (list.length) byCal.set(r.value.calendarId, list);
@@ -239,6 +259,12 @@ export async function bookSlot(contact, iso, { title, notes, assignedUserId } = 
 
   const start = new Date(iso);
   if (isNaN(start.getTime())) return { ok: false, error: 'iso inválido' };
+  // Defensivo: nunca marca fora do expediente, mesmo se a IA passar um horário que o
+  // lead pediu (fora da lista oferecida). O webhook trata ok:false ("mantém agendando").
+  if (!withinBusinessHours(iso)) {
+    logger.warn({ contactId: contact.id, iso }, 'book_slot fora do horário comercial — recusado');
+    return { ok: false, error: 'horário fora do expediente' };
+  }
   const end = new Date(start.getTime() + SLOT_MINUTES * 60 * 1000);
 
   // calendário do closer que tinha esse horário (ou o 1º configurado como fallback)
