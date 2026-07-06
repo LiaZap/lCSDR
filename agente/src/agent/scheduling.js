@@ -29,9 +29,12 @@ const TIMEZONE = process.env.GHL_TIMEZONE || 'America/Sao_Paulo';
 // TRAVA de horário comercial: a Tina só oferece/agenda slots DENTRO desta faixa
 // (hora local BRT). O free-slots do GHL às vezes devolve horários FORA do expediente
 // (ex.: 19h–23h30 por config de fuso/disponibilidade errada no calendário) — sem esta
-// trava a Tina agendava de madrugada. Default 9h–18h. Config: SCHEDULING_HOUR_MIN /
+// trava a Tina agendava de madrugada. Default 8h–18h = envelope que cobre TODOS os
+// closers (uns 8–17, outros 9–18) e bloqueia só o fora-de-hora (ex.: 19h–23h30 da
+// Andressa). O free-slots já respeita o expediente fino de cada calendário (menos o
+// bug da Andressa); a trava é a rede de segurança. Config: SCHEDULING_HOUR_MIN /
 // SCHEDULING_HOUR_MAX (0-24). Se MIN >= MAX (inválido), a trava fica DESLIGADA.
-const SCHED_HOUR_MIN = Number(process.env.SCHEDULING_HOUR_MIN ?? 9);
+const SCHED_HOUR_MIN = Number(process.env.SCHEDULING_HOUR_MIN ?? 8);
 const SCHED_HOUR_MAX = Number(process.env.SCHEDULING_HOUR_MAX ?? 18);
 function slotHourBRT(iso) {
   try {
