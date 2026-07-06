@@ -3,6 +3,8 @@ import { GHL } from './ghl/client.js';
 import { resumeIA } from './agent/handoff.js';
 import { recordOutbound } from './agent/contactService.js';
 import { sendResumoDiaGroup } from './agent/notify.js';
+import { sweepOrganico } from './agent/organicoSweep.js';
+import { handleOpportunityStage } from './routes/webhook.js';
 import { logger } from './utils/logger.js';
 
 const TICK_MS = 60_000; // 1 min
@@ -107,6 +109,43 @@ async function maybeSendResumoDia() {
   }
 }
 
+// VARREDURA automática do Funil Orgânico (safety-net): responde os leads PARADOS
+// (esperando resposta, <24h, só na raia da Tina, sem SDR ativo) mesmo se o webhook
+// ao vivo falhar ou houver apagão de IA — pra os leads não empilharem. Default
+// DESLIGADA (ORGANICO_SWEEP_ENABLED=true pra ligar). Roda a cada ORGANICO_SWEEP_MINUTES
+// (default 30), no máx. ORGANICO_SWEEP_MAX leads por rodada (default 12). Idempotente:
+// o cooldown de 12h do handleOpportunityStage evita re-responder o mesmo lead.
+const SWEEP_ON = process.env.ORGANICO_SWEEP_ENABLED === 'true';
+const SWEEP_INTERVAL_MS = Math.max(5, Number(process.env.ORGANICO_SWEEP_MINUTES) || 30) * 60_000;
+const SWEEP_MAX = Math.max(1, Number(process.env.ORGANICO_SWEEP_MAX) || 12);
+let _sweepLast = 0;
+let _sweepRunning = false;
+
+async function maybeSweepOrganico() {
+  if (!SWEEP_ON) return;
+  if (_sweepRunning) return;                                  // não sobrepõe (a varredura demora)
+  if (Date.now() - _sweepLast < SWEEP_INTERVAL_MS) return;
+  _sweepLast = Date.now();
+  _sweepRunning = true;
+  try {
+    const r = await sweepOrganico({
+      send: true,
+      max: SWEEP_MAX,
+      respondFn: (cid) => handleOpportunityStage({ type: 'IaTinaAssumir', contactId: cid, _force: true }),
+    });
+    if (r.esperando || r.respondidos) {
+      logger.info({
+        total: r.total, esperando: r.esperando, respondidos: r.respondidos,
+        foraRaia: r.foraRaia, sdrAtivo: r.sdrAtivo, fora24h: r.fora24h, elegiveis: r.elegiveis.length,
+      }, 'varredura Funil Orgânico');
+    }
+  } catch (e) {
+    logger.error({ err: e.message }, 'varredura Funil Orgânico falhou');
+  } finally {
+    _sweepRunning = false;
+  }
+}
+
 export function startScheduler() {
   const resumoOn = process.env.RESUMO_DIA_ENABLED === 'true';
   const resumoConfigOk = Boolean(process.env.UAZAPI_NOTIFY_GROUP && process.env.UAZAPI_TOKEN);
@@ -116,9 +155,11 @@ export function startScheduler() {
   logger.info({
     tick_ms: TICK_MS,
     resumoDia: resumoOn ? (resumoConfigOk ? `ligado (${process.env.RESUMO_DIA_HORA || 18}h BRT)` : 'ligado mas sem grupo/token') : 'desligado',
+    varreduraOrganico: SWEEP_ON ? `ligada (${SWEEP_INTERVAL_MS / 60000}min, máx ${SWEEP_MAX})` : 'desligada',
   }, 'scheduler iniciado');
   setInterval(() => {
     processFollowups().catch(err => logger.error(err));
     maybeSendResumoDia().catch(err => logger.error(err));
+    maybeSweepOrganico().catch(err => logger.error(err));
   }, TICK_MS);
 }
