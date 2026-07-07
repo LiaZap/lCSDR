@@ -23,6 +23,7 @@ import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipe
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff, notifyIaTinaForaJanela } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
+import { attributionEnabled, enrichContactAttribution } from '../agent/attribution.js';
 
 const router = express.Router();
 const MAX_KB = Number(process.env.MAX_ATTACHMENT_KB || 200);
@@ -731,6 +732,29 @@ async function handleInbound(event) {
   }
 
   const contact = upsertContactFromGHL(ghlContact);
+
+  // 1.5-track) RASTREAMENTO DE ANÚNCIO (Click-to-WhatsApp → UTM): copia a atribuição
+  // que a GHL já captura (adId, nome do anúncio, URL, ctwaClid; +campanha/conjunto se
+  // META_ADS_TOKEN) pros campos UTM. Roda 1x por contato — pra TODO lead, mesmo os que
+  // a Tina não responde. Fire-and-forget, fail-open: nunca bloqueia/quebra a Tina.
+  // Reaproveita o ghlContact já hidratado (attributionSource vem no GET /contacts).
+  if (attributionEnabled()) {
+    try {
+      const done = db.prepare(`SELECT 1 FROM events_log WHERE contact_id=? AND kind='attribution_synced' LIMIT 1`).get(contact.id);
+      if (!done) {
+        enrichContactAttribution(ghlContactId, { contact: ghlContact })
+          .then(r => {
+            if (r?.ok) {
+              try {
+                db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'attribution_synced', ?)`)
+                  .run(contact.id, JSON.stringify(r));
+              } catch {}
+            }
+          })
+          .catch(() => {});
+      }
+    } catch {}
+  }
 
   // 1.5a) OUTRO TIME — DEFAULT ON (sempre, independente do modo/whitelist): a Tina
   // NUNCA assume lead que outro time está trabalhando — opp ABERTA em Reentrada OU
