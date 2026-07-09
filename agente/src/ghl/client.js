@@ -174,6 +174,18 @@ export const GHL = {
   async getContactAppointments(contactId) {
     return ghl('GET', `/contacts/${contactId}/appointments`);
   },
+  // Reuniões de um CALENDÁRIO numa janela (ms epoch). Pega TUDO que está no
+  // calendário — inclusive marcações manuais pelo contact page. Usado pra travar
+  // conflito antes de agendar. Retorna { events: [...] }.
+  async getCalendarEvents(calendarId, { startTime, endTime }) {
+    const q = new URLSearchParams({
+      locationId: process.env.GHL_LOCATION_ID,
+      calendarId,
+      startTime: String(startTime),
+      endTime: String(endTime),
+    });
+    return ghl('GET', `/calendars/events?${q}`);
+  },
   async deleteContact(contactId) {
     return ghl('DELETE', `/contacts/${contactId}`);
   },

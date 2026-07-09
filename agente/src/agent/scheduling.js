@@ -26,6 +26,15 @@ const SLOT_MINUTES = Number(process.env.GHL_SLOT_MINUTES || 30);
 const LOOKAHEAD_DAYS = Number(process.env.GHL_SLOT_LOOKAHEAD_DAYS || 5);
 const TIMEZONE = process.env.GHL_TIMEZONE || 'America/Sao_Paulo';
 
+// TRAVA DE CONFLITO: antes de agendar, confere se o horário JÁ tem reunião no
+// calendário (via /calendars/events) e recusa se tiver. Pega o que o free-slots
+// não vê: marcação MANUAL pelo contact page, corrida entre 2 leads, buffer não
+// aplicado. Default LIGADA; SCHEDULING_CONFLICT_CHECK=false desliga. A folga extra
+// (além da sobreposição pura) vem de SCHEDULING_MIN_GAP_MIN (default 0 = só bloqueia
+// sobreposição real; o intervalo entre reuniões já é garantido pelo buffer do GHL).
+const CONFLICT_CHECK = process.env.SCHEDULING_CONFLICT_CHECK !== 'false';
+const MIN_GAP_MS = Math.max(0, Number(process.env.SCHEDULING_MIN_GAP_MIN) || 0) * 60_000;
+
 // TRAVA de horário comercial: a Tina só oferece/agenda slots DENTRO desta faixa
 // (hora local BRT). O free-slots do GHL às vezes devolve horários FORA do expediente
 // (ex.: 19h–23h30 por config de fuso/disponibilidade errada no calendário) — sem esta
@@ -254,6 +263,37 @@ export async function upcomingAppointment(contact) {
   }
 }
 
+// TRUE se [startMs,endMs] (± MIN_GAP_MS) colide com alguma reunião ATIVA já
+// existente no calendário. Consulta /calendars/events (pega marcações manuais que
+// o free-slots ignora). Fail-open: erro de API → false (não trava agendamento por
+// hiccup; buffer/free-slots/Outlook seguem protegendo). Reuniões canceladas/no-show
+// não contam.
+async function slotHasConflict(calendarId, startMs, endMs) {
+  if (!CONFLICT_CHECK || !calendarId || !process.env.GHL_API_TOKEN) return false;
+  try {
+    // janela de busca com margem (pega vizinhas); a colisão é testada com precisão abaixo
+    const r = await GHL.getCalendarEvents(calendarId, {
+      startTime: startMs - MIN_GAP_MS - 3_600_000,
+      endTime: endMs + MIN_GAP_MS + 3_600_000,
+    });
+    const events = r?.events || r?.appointments || (Array.isArray(r) ? r : []);
+    if (!Array.isArray(events) || !events.length) return false;
+    const aStart = startMs - MIN_GAP_MS;
+    const aEnd = endMs + MIN_GAP_MS;
+    return events.some(e => {
+      const status = String(e.appointmentStatus || e.status || '').toLowerCase();
+      if (/cancel|invalid|noshow|no-show|deleted/.test(status)) return false;
+      const es = new Date(e.startTime || e.startedAt || 0).getTime();
+      const ee = new Date(e.endTime || e.endedAt || es).getTime();
+      if (!es) return false;
+      return aStart < ee && aEnd > es; // sobreposição (bordas que só encostam NÃO colidem)
+    });
+  } catch (err) {
+    logger.warn({ err: err.message, calendarId }, 'trava de conflito falhou; segue (fail-open)');
+    return false;
+  }
+}
+
 // Marca o agendamento no GHL, no calendário do closer dono do horário.
 // Retorna { ok, label, error }.
 export async function bookSlot(contact, iso, { title, notes, assignedUserId } = {}) {
@@ -273,6 +313,13 @@ export async function bookSlot(contact, iso, { title, notes, assignedUserId } = 
   // calendário do closer que tinha esse horário (ou o 1º configurado como fallback)
   const calendarId = calendarForSlot(contact.id, iso) || getCalendarIds()[0];
   if (!calendarId) return { ok: false, error: 'sem calendário configurado' };
+
+  // TRAVA DE CONFLITO: recusa se o horário já tem reunião (manual, corrida, etc.).
+  // ok:false → webhook mantém a Tina agendando e ela oferece outro horário no próximo turno.
+  if (await slotHasConflict(calendarId, start.getTime(), end.getTime())) {
+    logger.warn({ contactId: contact.id, iso, calendarId }, 'book_slot: já existe reunião nesse horário — recusado (evita sobreposição)');
+    return { ok: false, error: 'horário já ocupado' };
+  }
 
   try {
     const res = await GHL.bookAppointment({
