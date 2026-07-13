@@ -87,7 +87,20 @@ app.use('/api', apiLimiter);
 app.get('/health', (_, res) => {
   try {
     db.prepare('SELECT 1').get();
-    res.json({ ok: true, ts: new Date().toISOString() });
+    // cfg: flags de configuração (só booleanos/tipo, SEM valores de segredo) — serve pra
+    // confirmar remotamente o que está ligado em produção sem adivinhar. Se este bloco
+    // aparecer no /health, o deploy pegou este build.
+    res.json({
+      ok: true,
+      ts: new Date().toISOString(),
+      cfg: {
+        attribution: process.env.ATTRIBUTION_SYNC_ENABLED === 'true',
+        metaToken: Boolean(process.env.META_ADS_TOKEN),
+        outbound: process.env.GHL_OUTBOUND_TYPE || 'WhatsApp',
+        conflictCheck: process.env.SCHEDULING_CONFLICT_CHECK !== 'false',
+        organicoSweep: process.env.ORGANICO_SWEEP_ENABLED === 'true',
+      },
+    });
   } catch (err) {
     logger.error({ err: err.message }, 'health check falhou');
     res.status(503).json({ ok: false, error: 'db unreachable' });
