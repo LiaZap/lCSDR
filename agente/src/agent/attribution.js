@@ -130,12 +130,21 @@ async function buildFields(attr, names) {
 // Enriquece UM contato: lê atribuição → grava UTM. Idempotente e fail-open.
 // opts.contact: passa o objeto do contato já buscado (evita refetch).
 // opts.dryRun: calcula mas NÃO grava (pra o backfill em modo simulação).
-export async function enrichContactAttribution(ghlContactId, { contact = null, dryRun = false } = {}) {
+export async function enrichContactAttribution(ghlContactId, { contact = null, dryRun = false, skipIfFilled = false } = {}) {
   if (!ghlContactId || !process.env.GHL_API_TOKEN) return { ok: false, reason: 'sem-id-ou-token' };
   try {
     const c = contact || await GHL.getContact(ghlContactId);
     const attr = readAttribution(c);
     if (!attr) return { ok: true, skipped: 'sem-atribuicao-de-anuncio' };
+    // Idempotência sem banco: se o contato JÁ tem o campo do anúncio preenchido, não regrava.
+    // Deixa o gancho ao vivo rodar em TODO inbound sem custo de re-escrita.
+    if (skipIfFilled) {
+      const idByKey = await fieldIdByKey();
+      const sid = idByKey[fieldMap().adId];
+      if (sid && (c.customFields || c.custom_fields || []).some(x => x.id === sid && x.value)) {
+        return { ok: true, skipped: 'ja-preenchido', adId: attr.adId };
+      }
+    }
     const names = await resolveAdNames(attr.adId); // null no Nível 1
     const fields = await buildFields(attr, names);
     if (!fields.length) return { ok: true, skipped: 'sem-campos-para-gravar', adId: attr.adId };

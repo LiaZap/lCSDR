@@ -708,6 +708,16 @@ async function handleInbound(event) {
 
   const tags = extractTags(ghlContact);
 
+  // 1.2) RASTREAMENTO DE ANÚNCIO (Click-to-WhatsApp → UTM): copia a atribuição que a
+  // GHL já captura (adId, nome do anúncio, URL, ctwaClid; +campanha/conjunto se
+  // META_ADS_TOKEN) pros campos UTM. Roda ANTES das travas de tag — pra TODO lead de
+  // anúncio, mesmo os que a Tina NÃO responde (whitelist/bloqueio/pausa retornam abaixo).
+  // Idempotente (skipIfFilled: pula se o campo já está preenchido, sem tocar no banco),
+  // fire-and-forget e fail-open: nunca bloqueia nem quebra a Tina.
+  if (attributionEnabled()) {
+    enrichContactAttribution(ghlContactId, { contact: ghlContact, skipIfFilled: true }).catch(() => {});
+  }
+
   // 1.4) WHITELIST: durante teste/staging, Tina só atende quem TEM a tag tina-liberada.
   // Sem essa verificação, qualquer lead importado no GHL recebe resposta automática.
   if (REQUIRED_TAG_ENABLED && !ATTEND_EXCEPT_REENTRADA && !tags.includes(REQUIRED_TAG)) {
@@ -732,29 +742,6 @@ async function handleInbound(event) {
   }
 
   const contact = upsertContactFromGHL(ghlContact);
-
-  // 1.5-track) RASTREAMENTO DE ANÚNCIO (Click-to-WhatsApp → UTM): copia a atribuição
-  // que a GHL já captura (adId, nome do anúncio, URL, ctwaClid; +campanha/conjunto se
-  // META_ADS_TOKEN) pros campos UTM. Roda 1x por contato — pra TODO lead, mesmo os que
-  // a Tina não responde. Fire-and-forget, fail-open: nunca bloqueia/quebra a Tina.
-  // Reaproveita o ghlContact já hidratado (attributionSource vem no GET /contacts).
-  if (attributionEnabled()) {
-    try {
-      const done = db.prepare(`SELECT 1 FROM events_log WHERE contact_id=? AND kind='attribution_synced' LIMIT 1`).get(contact.id);
-      if (!done) {
-        enrichContactAttribution(ghlContactId, { contact: ghlContact })
-          .then(r => {
-            if (r?.ok) {
-              try {
-                db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'attribution_synced', ?)`)
-                  .run(contact.id, JSON.stringify(r));
-              } catch {}
-            }
-          })
-          .catch(() => {});
-      }
-    } catch {}
-  }
 
   // 1.5a) OUTRO TIME — DEFAULT ON (sempre, independente do modo/whitelist): a Tina
   // NUNCA assume lead que outro time está trabalhando — opp ABERTA em Reentrada OU
