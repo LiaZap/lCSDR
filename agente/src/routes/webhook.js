@@ -367,6 +367,10 @@ async function lastOutboundWasHuman(ghlContactId, localContact) {
 async function maybeReclaimLead(fresh, ghlContactId) {
   if (!OWNS_ENTRY_LANE && ATTENDANCE_HOURS <= 0) return false;               // feature desligada
   if (['desqualificado', 'agendado', 'qualificado'].includes(fresh.stage)) return false;
+  // Reunião futura JÁ marcada (por humano ou Tina — o stage local não vê as marcadas
+  // por consultor) → lead fechado, não reassume (caso Gabriel: Bruna marcou 16h e a
+  // Tina voltou oferecendo 10h/14h).
+  if (await upcomingAppointment(fresh)) return false;
   if (!(await contactExclusivelyInTinaLane(fresh))) return false;            // negócio vivo fora da raia
   // NÃO sobrescreve SDR ativo: cede se um consultor mandou msg dentro da janela.
   // Dono da raia → janela CURTA (SDR ativo AGORA); cooldown → janela longa (SDR sumiu).
@@ -566,6 +570,14 @@ export async function handleOpportunityStage(event) {
   }
 
   const contact = upsertContactFromGHL(ghlContact);
+
+  // Lead JÁ TEM reunião futura (marcada por quem for) → não re-engaja pra agendar
+  // de novo (caso Gabriel 16/07: já tinha 16h com a Andressa e a Tina retomou
+  // oferecendo 10h/14h). Vale pra varredura, recuperação e continuidade.
+  if (await upcomingAppointment(contact)) {
+    logger.info({ ghlContactId, contactId: contact.id }, 'continuidade IA Tina: lead já tem reunião futura — não re-engaja');
+    return;
+  }
 
   // O move PRA IA Tina É a autorização do time → garante a tag de liberação
   // (senão o whitelist barraria as próximas mensagens do lead).

@@ -51,6 +51,24 @@ export async function liveHandoff(contact) {
     return { ok: true, consultant: null };
   }
 
+  // Caso Leandro (16/07): lead já estava sendo atendido pelo Victor e o rodízio
+  // passou pra Fernanda. Se o lead JÁ tem consultor atribuído no GHL e ele está
+  // na fila, MANTÉM com ele (kind próprio pra não avançar o rodízio dos demais).
+  if (process.env.GHL_API_TOKEN && contact.ghl_contact_id && !String(contact.ghl_contact_id).startsWith('wa-')) {
+    try {
+      const g = await GHL.getContact(contact.ghl_contact_id);
+      const atual = consultants.find(c => c.userId === g?.assignedTo);
+      if (atual) {
+        db.prepare("INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'live_handoff_kept', ?)")
+          .run(contact.id, JSON.stringify({ userId: atual.userId, name: atual.name }));
+        logger.info({ contactId: contact.id, consultant: atual.name || atual.userId }, 'lead mantido com o consultor que já atendia (falar agora)');
+        return { ok: true, consultant: atual };
+      }
+    } catch (err) {
+      logger.warn({ err: err.message, contactId: contact.id }, 'falha checando consultor atual; segue rodízio');
+    }
+  }
+
   const { consultant, idx } = nextConsultant(consultants);
 
   // atribui o contato ao consultor da vez no GHL
