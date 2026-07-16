@@ -294,6 +294,28 @@ async function slotHasConflict(calendarId, startMs, endMs) {
   }
 }
 
+// Dono (teamMember) de cada calendário — cache por processo, 1 chamada resolve todos.
+// Usado pra ATRIBUIR o contato/reunião ao consultor (regra LC 16/07: sem proprietário
+// a conversa não aparece na caixa de entrada de ninguém — caso Creusa).
+let _calOwners = null;
+async function calendarOwnerUserId(calendarId) {
+  if (!calendarId) return null;
+  if (!_calOwners) {
+    try {
+      const r = await GHL.listCalendars();
+      _calOwners = {};
+      for (const c of (r?.calendars || [])) {
+        const tm = (c.teamMembers || []).find(t => t.isPrimary) || (c.teamMembers || [])[0];
+        if (tm?.userId) _calOwners[c.id] = tm.userId;
+      }
+    } catch (err) {
+      logger.warn({ err: err.message }, 'falha resolvendo donos dos calendários (segue sem atribuir)');
+      return null; // não cacheia a falha — tenta de novo no próximo agendamento
+    }
+  }
+  return _calOwners[calendarId] || null;
+}
+
 // Marca o agendamento no GHL, no calendário do closer dono do horário.
 // Retorna { ok, label, error }.
 export async function bookSlot(contact, iso, { title, notes, assignedUserId } = {}) {
@@ -321,6 +343,10 @@ export async function bookSlot(contact, iso, { title, notes, assignedUserId } = 
     return { ok: false, error: 'horário já ocupado' };
   }
 
+  // Consultor dono do calendário → vira o responsável pela reunião E proprietário
+  // do contato (senão a conversa não aparece na caixa de entrada de ninguém).
+  const ownerId = assignedUserId || await calendarOwnerUserId(calendarId);
+
   try {
     const res = await GHL.bookAppointment({
       calendarId,
@@ -329,9 +355,14 @@ export async function bookSlot(contact, iso, { title, notes, assignedUserId } = 
       endTime: end.toISOString(),
       title: title || `Reunião LC, ${contact.name || 'lead'}`,
       notes: notes || `Agendado pela Tina (SDR). Funil: ${contact.funnel || '-'}.`,
-      ...(assignedUserId ? { assignedUserId } : {}),
+      ...(ownerId ? { assignedUserId: ownerId } : {}),
     });
     logger.info({ contactId: contact.id, iso, calendarId, apptId: res?.id || res?.appointment?.id }, 'reunião agendada no GHL');
+    // Atribui o CONTATO ao consultor (fire-and-forget; não desfaz a reunião se falhar)
+    if (ownerId) {
+      GHL.assignContact(contact.ghl_contact_id, ownerId).catch(err =>
+        logger.warn({ err: err.message, contactId: contact.id, ownerId }, 'falha atribuindo proprietário ao contato (segue)'));
+    }
     return { ok: true, label: labelForSlot(iso), calendarId, appointment: res };
   } catch (err) {
     logger.error({ err: err.message, contactId: contact.id, iso, calendarId }, 'falha ao agendar no GHL');

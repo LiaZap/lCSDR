@@ -1008,6 +1008,18 @@ async function handleInbound(event) {
       return;
     }
 
+    // 6.9) E-MAIL DO LEAD (regra LC 16/07: sempre pedir e-mail antes de agendar).
+    // A Tina extrai em result.lead_email; aqui salva no GHL + local. Fail-open.
+    if (result.lead_email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(result.lead_email).trim())) {
+      const mail = String(result.lead_email).trim().toLowerCase();
+      if (mail !== (fresh.email || '').toLowerCase()) {
+        GHL.updateContact(ghlContactId, { email: mail }).catch(err =>
+          logger.warn({ err: err.message, contactId: fresh.id }, 'falha salvando lead_email no GHL'));
+        try { db.prepare('UPDATE contacts SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(mail, fresh.id); } catch {}
+        logger.info({ contactId: fresh.id }, 'e-mail do lead capturado pela Tina e salvo');
+      }
+    }
+
     // 7) AGENDAMENTO, fase 3: o lead confirmou um horário → marca no GHL.
     let booked = null;
     if (schedulingEnabled() && result.book_slot) {

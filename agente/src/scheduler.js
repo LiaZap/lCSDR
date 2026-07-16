@@ -47,7 +47,9 @@ async function processFollowups() {
       const saudacao = nome ? `Oi ${nome}, ` : 'Oi, ';
       const txt = f.reason === 'silencio_sdr'
         ? `${saudacao}passando pra te dar um retorno. O time já foi notificado, mas pra não te deixar no vácuo: me conta rapidinho o que você está precisando? Assim agilizo aqui.`
-        : `${saudacao}dei uma sumida, me desculpa. Você ainda está interessado em saber mais sobre o livro? Se sim, me conta onde você está agora: escrevendo, com livro pronto pra publicar, ou quer divulgar um que já lançou?`;
+        : f.reason === 'silencio_lead_24h'
+          ? `${saudacao}ainda está por aí? 😊 Pra eu te ajudar a dar o próximo passo com o seu livro, me conta: você está escrevendo, quer publicar ou divulgar um que já lançou?`
+          : `${saudacao}dei uma sumida, me desculpa. Você ainda está interessado em saber mais sobre o livro? Se sim, me conta onde você está agora: escrevendo, com livro pronto pra publicar, ou quer divulgar um que já lançou?`;
 
       await GHL.sendMessage({
         contactId: f.ghl_contact_id,
@@ -58,6 +60,14 @@ async function processFollowups() {
       db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'followup_sent', ?)`)
         .run(f.contact_id, JSON.stringify({ reason: f.reason }));
       logger.info({ contactId: f.contact_id, reason: f.reason }, 'follow-up enviado');
+
+      // Regra LC 16/07: se o lead seguir sem responder, SEGUNDO toque em 24h.
+      // Só encadeia a partir do 1º follow-up (não do _24h) → máximo 2 toques.
+      // Se o lead responder antes, o webhook re-agenda/cancela os pendentes.
+      if (f.reason === 'silencio_lead') {
+        db.prepare(`INSERT INTO followups (contact_id, due_at, reason) VALUES (?, ?, 'silencio_lead_24h')`)
+          .run(f.contact_id, new Date(Date.now() + 24 * 3600_000).toISOString());
+      }
     } catch (err) {
       logger.error({ err: err.message, followupId: f.id }, 'falha em follow-up');
     }

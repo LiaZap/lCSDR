@@ -1,7 +1,8 @@
 import { db } from '../db/index.js';
 import { GHL } from '../ghl/client.js';
 import { writeQualificationFields } from '../ghl/customFields.js';
-import { createOrMoveOpportunityQualified } from '../ghl/opportunities.js';
+import { createOrMoveOpportunityQualified, resolvePipeline } from '../ghl/opportunities.js';
+import { upcomingAppointment } from './scheduling.js';
 import { logger } from '../utils/logger.js';
 
 const FOLLOWUP_MIN = Number(process.env.FOLLOWUP_SILENCE_MINUTES || 60);
@@ -204,6 +205,42 @@ export async function markQualifiedAndHandoff(contact, result, { pause = true } 
   await Promise.allSettled([fields, opp]);
 }
 
+// Regra LC 16/07 (caso Creusa): lead desqualificado que encerrou o atendimento →
+// DECLINA o card no GHL (opp aberta no pipeline da Tina vira 'lost') e TIRA a
+// reunião futura da agenda (Creusa recusou depois de agendar e a reunião ficou
+// pendurada no calendário). Só toca o pipeline da Tina — card de outro time fica
+// intacto. Fail-open. Desliga com DECLINE_OPP_ON_DISQUALIFY=false.
+const DECLINE_ON_DISQUALIFY = process.env.DECLINE_OPP_ON_DISQUALIFY !== 'false';
+
+async function declineOppAndAppointment(contact) {
+  if (!DECLINE_ON_DISQUALIFY || !process.env.GHL_API_TOKEN || isSyntheticId(contact.ghl_contact_id)) return;
+  // 1) reunião futura → cancela (tira da agenda do closer)
+  try {
+    const ev = await upcomingAppointment(contact);
+    if (ev?.id) {
+      await GHL.deleteAppointment(ev.id);
+      logger.info({ contactId: contact.id, apptId: ev.id }, 'desqualificado: reunião futura cancelada');
+    }
+  } catch (err) {
+    logger.warn({ err: err.message, contactId: contact.id }, 'falha cancelando reunião do desqualificado (segue)');
+  }
+  // 2) opp aberta no pipeline da Tina → lost (card declinado)
+  try {
+    const { pipelineId } = resolvePipeline();
+    if (!pipelineId) return;
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
+    const ops = r?.opportunities || (Array.isArray(r) ? r : []);
+    for (const o of ops) {
+      if (String(o.status || 'open').toLowerCase() !== 'open') continue;
+      if (o.pipelineId !== pipelineId) continue; // nunca mexe em card de outro time
+      await GHL.updateOpportunity(o.id, { pipelineId: o.pipelineId, pipelineStageId: o.pipelineStageId, status: 'lost' });
+      logger.info({ contactId: contact.id, oppId: o.id }, 'desqualificado: card declinado (lost) no GHL');
+    }
+  } catch (err) {
+    logger.warn({ err: err.message, contactId: contact.id }, 'falha declinando card do desqualificado (segue)');
+  }
+}
+
 export async function markDisqualified(contact, result) {
   db.prepare(`
     UPDATE contacts
@@ -214,6 +251,9 @@ export async function markDisqualified(contact, result) {
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(result.qualification_score || 0, result.qualification_notes || '', contact.id);
+
+  // Declina card + cancela reunião em paralelo (não bloqueia a resposta ao lead)
+  declineOppAndAppointment(contact).catch(() => {});
 
   // Etiquetas (temperatura frio, etc) são aplicadas pelo applyTinaTags()
   // que o webhook chama a cada turno. Aqui só os custom fields.
