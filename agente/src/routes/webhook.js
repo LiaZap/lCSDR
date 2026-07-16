@@ -715,7 +715,18 @@ async function handleInbound(event) {
   // Idempotente (skipIfFilled: pula se o campo já está preenchido, sem tocar no banco),
   // fire-and-forget e fail-open: nunca bloqueia nem quebra a Tina.
   if (attributionEnabled()) {
-    enrichContactAttribution(ghlContactId, { contact: ghlContact, skipIfFilled: true }).catch(() => {});
+    enrichContactAttribution(ghlContactId, { contact: ghlContact, skipIfFilled: true })
+      .then(r => {
+        // CORRIDA: em alguns leads o GHL grava o attributionSource DEPOIS do webhook
+        // do 1º inbound — e lead de anúncio que manda só 1 mensagem nunca gera outro
+        // inbound pra corrigir. Retry único em 2 min com contato fresco resolve.
+        if (r?.skipped === 'sem-atribuicao-de-anuncio') {
+          setTimeout(() => {
+            enrichContactAttribution(ghlContactId, { skipIfFilled: true }).catch(() => {});
+          }, 120_000);
+        }
+      })
+      .catch(() => {});
   }
 
   // 1.4) WHITELIST: durante teste/staging, Tina só atende quem TEM a tag tina-liberada.
