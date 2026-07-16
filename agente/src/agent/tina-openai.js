@@ -218,7 +218,7 @@ export async function generateTinaReplyOpenAI({ contact, incomingText, extraCont
   const usableName = sanitizeContactName(contact.name);
   let meta = `
 Contexto atual do lead (NÃO responda sobre isso, só use pra calibrar):
-- Nome: ${usableName || '⚠ AINDA NÃO CONHECIDO — use saudação genérica tipo "Olá!" sem nome até o lead se apresentar'}
+- Nome: ${usableName || '⚠ AINDA NÃO CONHECIDO — chame de "Escritor(a)" ou use saudação genérica até o lead se apresentar'}
 - Funil detectado até agora: ${contact.funnel || 'ainda não identificado'}
 - Estágio: ${contact.stage || 'novo'}
 - Última nota de qualificação: ${contact.qualification_notes || 'nenhuma'}
