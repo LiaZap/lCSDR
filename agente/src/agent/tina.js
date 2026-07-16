@@ -133,6 +133,19 @@ function pickSecondary(primary) {
 }
 
 export async function generateTinaReply({ contact, incomingText, extraContext = null }) {
+  // Hora atual (BRT) no contexto — regra LC 16/07: sem isso a Tina não sabe que são
+  // 23h e promete "o especialista te chama em instantes" fora do expediente.
+  // Entra aqui (entrada única) pra valer pros 3 providers; NÃO vai no system prompt
+  // pra não estourar o cache (prompt estático = cache hit).
+  try {
+    const agora = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: process.env.GHL_TIMEZONE || 'America/Sao_Paulo',
+      weekday: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(new Date());
+    const horaCtx = `AGORA em Brasília: ${agora}. Horário de atendimento do time humano: 9h às 18h, seg-sex.`;
+    extraContext = extraContext ? `${horaCtx}\n\n${extraContext}` : horaCtx;
+  } catch { /* sem hora no contexto, segue */ }
+
   const primary = llmProvider();
   const secondary = pickSecondary(primary);
 
