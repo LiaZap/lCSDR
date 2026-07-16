@@ -4,6 +4,7 @@ import { resumeIA } from './agent/handoff.js';
 import { recordOutbound } from './agent/contactService.js';
 import { sendResumoDiaGroup } from './agent/notify.js';
 import { sweepOrganico } from './agent/organicoSweep.js';
+import { upcomingAppointment } from './agent/scheduling.js';
 import { handleOpportunityStage } from './routes/webhook.js';
 import { logger } from './utils/logger.js';
 
@@ -42,6 +43,10 @@ async function processFollowups() {
       // Defesa em camadas: se a IA está pausada (qualquer motivo), nem retoma.
       // Só caminho legítimo de follow-up é silencio_lead com IA não-pausada.
       if (f.ai_paused) continue;
+
+      // Lead JÁ TEM reunião futura no GHL (marcada por humano — o stage local não
+      // vê) → não cutuca ("você ainda tem interesse?" pra quem já marcou é ruim).
+      if (await upcomingAppointment({ id: f.contact_id, ghl_contact_id: f.ghl_contact_id })) continue;
 
       const nome = (f.name || '').split(' ')[0];
       const saudacao = nome ? `Oi ${nome}, ` : 'Oi, ';
