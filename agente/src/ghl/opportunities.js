@@ -203,6 +203,12 @@ export async function contactOppInReentrada(contact) {
 // atende. Cobre "outros funis" sem precisar listar 80 stages. Dentro do pipeline
 // da Tina, a colisão (Follow Up/Proposta) fica na detecção por MENSAGEM
 // (lastOutboundWasHuman). Falha ABERTO (erro → false → atende; não trava por hiccup).
+// Card DECLINADO (lost) por consultor em OUTRO pipeline conta como "do time" por
+// este período (caso Keli 13/07: consultora atendeu, declinou o card, e a Tina
+// reabriu o atendimento + criou card novo). Depois da janela o lead volta a poder
+// ser reengajado (lead antigo é lead novo). LOST_OPP_BLOCK_DAYS=0 desliga.
+const LOST_BLOCK_DAYS = Number(process.env.LOST_OPP_BLOCK_DAYS ?? 30);
+
 export async function contactWorkedByOtherTeam(contact) {
   const { pipelineId } = resolvePipeline();
   if (!contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return false;
@@ -211,9 +217,18 @@ export async function contactWorkedByOtherTeam(contact) {
     const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
     const ops = r?.opportunities || (Array.isArray(r) ? r : []);
     return ops.some(o => {
-      if (String(o.status || 'open').toLowerCase() !== 'open') return false;
-      if (blocked.has(o.pipelineStageId)) return true;                          // Reentrada
-      if (o.pipelineId && pipelineId && o.pipelineId !== pipelineId) return true; // outro time/pipeline
+      const status = String(o.status || 'open').toLowerCase();
+      const otherPipe = o.pipelineId && pipelineId && o.pipelineId !== pipelineId;
+      if (status === 'open') {
+        if (blocked.has(o.pipelineStageId)) return true;   // Reentrada
+        if (otherPipe) return true;                        // outro time/pipeline
+        return false;
+      }
+      // Declinado há pouco em outro pipeline → o time encerrou de propósito, Tina não reabre.
+      if (/lost|abandon/.test(status) && otherPipe && LOST_BLOCK_DAYS > 0) {
+        const t = new Date(o.updatedAt || o.lastStatusChangeAt || o.dateUpdated || 0).getTime();
+        if (t && (Date.now() - t) < LOST_BLOCK_DAYS * 86_400_000) return true;
+      }
       return false;
     });
   } catch {
