@@ -353,7 +353,7 @@ export async function bookSlot(contact, iso, { title, notes, assignedUserId } = 
       contactId: contact.ghl_contact_id,
       startTime: start.toISOString(),
       endTime: end.toISOString(),
-      title: title || `Reunião LC, ${contact.name || 'lead'}`,
+      title: title || `${process.env.GHL_APPOINTMENT_TITLE || 'Reunião LC'}, ${contact.name || 'lead'}`,
       notes: notes || `Agendado pela Tina (SDR). Funil: ${contact.funnel || '-'}.`,
       ...(ownerId ? { assignedUserId: ownerId } : {}),
     });

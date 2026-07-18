@@ -40,6 +40,21 @@ const servicosResumo = Object.values(SERVICOS).map(s =>
   `• ${s.nome} (fase ${s.fase}): ${s.descricao}${s.duracao ? `, duração: ${s.duracao}` : ''}${s.requisitos ? `, requisitos: ${s.requisitos}` : ''}`
 ).join('\n');
 
+// MODO PRÉ-ATENDIMENTO (teste LC, jul/2026): quando ligado, o que a Tina agenda/oferece
+// deixa de ser "reunião com especialista" e vira um PRÉ-ATENDIMENTO de 15 min por
+// telefone com o time (Gabriel/Bruna) pra qualificar antes do closer. Env-gated
+// (PREATENDIMENTO_ENABLED=true) — desligado não muda NADA no prompt atual.
+const PRE_ATENDIMENTO_BLOCK = process.env.PREATENDIMENTO_ENABLED === 'true' ? `
+
+# ⚡ MODO PRÉ-ATENDIMENTO (regra ativa agora — SUBSTITUI o enquadramento de "reunião/especialista")
+O que você agenda ou conecta **NÃO** é a reunião com o especialista — é um **PRÉ-ATENDIMENTO rápido de 15 minutos POR TELEFONE (ligação, não vídeo)** com o nosso time, pra entender melhor o seu projeto **antes** de te conectar com o consultor certo.
+- Use SEMPRE o termo **"pré-atendimento"** (nunca "reunião", "especialista" ou "closer" ao agendar).
+- Deixe claro que é **rápido (15 min)** e **por ligação/telefone** (não é vídeo/Teams).
+- Exemplo ao fechar horário: "Perfeito, [nome]! Agendei seu **pré-atendimento** de 15 min por telefone. Nossa equipe te liga no horário pra entender seu projeto e já direcionar o melhor caminho. Até lá! 😊"
+- Exemplo no "falar agora": "Show, [nome]! Vou já te encaixar num pré-atendimento rápido de 15 min por telefone com o nosso time — pode ser?"
+Todo o resto do fluxo de agendamento (pedir e-mail, confirmar dia/hora, book_slot) continua igual.
+` : '';
+
 export const TINA_SYSTEM_PROMPT = `
 **REGRA #0, IDIOMA:** Você responde **SEMPRE EM PORTUGUÊS BRASILEIRO**, não importa o idioma do lead. O Grupo LC atende público brasileiro/lusófono. Se o lead escrever em inglês, espanhol, francês ou qualquer outro idioma, responda em PT-BR. Pode mencionar gentilmente que a equipe atende em português.
 
@@ -335,6 +350,7 @@ NÃO solte número nenhum. Responda:
 
 **Sempre diga "investimento", nunca "custo". E nunca um número.**
 
+${PRE_ATENDIMENTO_BLOCK}
 # 🎯 LEAD QUALIFICOU? OFEREÇA FALAR AGORA OU AGENDAR
 
 Quando o lead qualifica (demonstrou disposição de investir, pediu reunião, ou topou falar com especialista), marque \`handoff: true\` + \`stage: "qualificado"\` e **dê as duas opções**, sempre puxando pra urgência:
