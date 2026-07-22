@@ -99,6 +99,11 @@ app.get('/health', (_, res) => {
         outbound: process.env.GHL_OUTBOUND_TYPE || 'WhatsApp',
         conflictCheck: process.env.SCHEDULING_CONFLICT_CHECK !== 'false',
         organicoSweep: process.env.ORGANICO_SWEEP_ENABLED === 'true',
+        preAtendimento: process.env.PREATENDIMENTO_ENABLED === 'true',
+        // tags de origem que a Tina NÃO atende (nomes, não são segredo) — permite
+        // conferir em produção se o bloqueio (ex.: form de Arquitetos) está ativo.
+        blockTags: (process.env.GHL_TAG_BLOCK || '').split(',').map(s => s.trim()).filter(Boolean),
+        calendars: (process.env.GHL_CALENDAR_IDS || '').split(',').filter(Boolean).length,
       },
     });
   } catch (err) {
