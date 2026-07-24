@@ -104,6 +104,8 @@ app.get('/health', (_, res) => {
         // conferir em produção se o bloqueio (ex.: form de Arquitetos) está ativo.
         blockTags: (process.env.GHL_TAG_BLOCK || '').split(',').map(s => s.trim()).filter(Boolean),
         calendars: (process.env.GHL_CALENDAR_IDS || '').split(',').filter(Boolean).length,
+        slotMinutes: Number(process.env.GHL_SLOT_MINUTES || 30),
+        lookaheadDays: Number(process.env.GHL_SLOT_LOOKAHEAD_DAYS || 5),
       },
     });
   } catch (err) {
