@@ -19,7 +19,7 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane, contactOppInReentrada, contactWorkedByOtherTeam, contactExclusivelyInTinaLane } from '../ghl/opportunities.js';
+import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane, contactOppInReentrada, contactWorkedByOtherTeam, contactExclusivelyInTinaLane, closeSdrOppOnBooking } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff, notifyIaTinaForaJanela } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
@@ -1123,6 +1123,9 @@ async function handleInbound(event) {
         WHERE id = ?
       `).run(fresh.id);
       db.prepare('UPDATE followups SET sent = 1 WHERE contact_id = ? AND sent = 0').run(fresh.id);
+      // Fecha o card do Pré-Vendas (SDR) pra não ficar aberto e virar duplicado
+      // (a automação de reentrada do GHL pegava o card aberto). Fire-and-forget.
+      closeSdrOppOnBooking(fresh).catch(() => {});
       await notifyAgendamento(fresh, { label: booked.label, iso: result.book_slot, funnel: result.funnel || fresh.funnel, calendarId: booked.calendarId });
 
     } else if (result.course_help === 'aluno' && result.end_conversation) {

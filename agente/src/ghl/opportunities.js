@@ -95,6 +95,30 @@ export async function createOrMoveOpportunityQualified(contact, { funnel, score,
   }
 }
 
+// Ao AGENDAR (Tina marcou reunião/pré-atendimento), FECHA a opp do Pré-Vendas (SDR)
+// como WON — o SDR concluiu e o lead vai pro pipeline de Vendas (Reuniões Agendadas,
+// criado pelo workflow do GHL). Sem isso a opp fica ABERTA e uma automação de
+// reentrada do GHL a captura ~2h depois → vira card duplicado (caso Cláudia). Só toca
+// o pipeline da Tina, NUNCA o de Vendas/outro time. Env CLOSE_SDR_OPP_ON_BOOKING=false
+// desliga. Fail-open. Não fecha won/lost já fechadas.
+export async function closeSdrOppOnBooking(contact) {
+  if (process.env.CLOSE_SDR_OPP_ON_BOOKING === 'false') return;
+  const { pipelineId } = resolvePipeline();
+  if (!pipelineId || !contact?.ghl_contact_id || String(contact.ghl_contact_id).startsWith('wa-') || !process.env.GHL_API_TOKEN) return;
+  try {
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
+    const ops = r?.opportunities || (Array.isArray(r) ? r : []);
+    for (const o of ops) {
+      if (String(o.status || 'open').toLowerCase() !== 'open') continue;
+      if (o.pipelineId !== pipelineId) continue;   // só o Pré-Vendas da Tina
+      await GHL.updateOpportunity(o.id, { pipelineId: o.pipelineId, pipelineStageId: o.pipelineStageId, status: 'won' });
+      logger.info({ contactId: contact.id, oppId: o.id }, 'agendou: card Pré-Vendas fechado (won) pra não duplicar');
+    }
+  } catch (err) {
+    logger.warn({ err: err.message, contactId: contact.id }, 'falha fechando card Pré-Vendas no agendamento (segue)');
+  }
+}
+
 // Stages "do time" (ex: Reentrada): se o lead tem oportunidade ABERTA numa
 // delas, o time já está re-trabalhando ele → a Tina NÃO deve assumir. Default:
 // "Reentrada" do Pré-Vendas LCA. Adicione outras stages via GHL_BLOCK_OPP_STAGES
