@@ -282,7 +282,7 @@ export const LINKS = {
   contato: 'contato@lcagencia.com.br',
   comercial: 'comercial@lcagencia.com.br',
   editora_email: 'contato@lcbookseditora.com.br',
-  editorial: 'editorial@lcagencia.com.br',   // orçamento de publicação (LC Books)
+  editorial: 'editorial@lcbookseditora.com.br',   // orçamento de publicação (LC Books)
   cursos: 'cursos@lcagencia.com.br',          // suporte a alunos do curso
   assessoria: 'carolina@lcagencia.com.br',    // contato interno assessoria de imprensa
 };
