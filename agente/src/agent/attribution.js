@@ -30,7 +30,7 @@ const DEFAULT_MAP = {
   utmCampaign: 'contact.utm_campaign',   // NOME da campanha (Nível 2)
   utmContent:  'contact.utm_content',    // NOME do anúncio
   utmTerm:     'contact.utm_term_lca',   // NOME do conjunto/adset (Nível 2)
-  ctwaClid:    'contact.ctwa_clid',      // click-id (só se o campo existir na location)
+  ctwaClid:    'contact.ctwaclid',       // click-id do CTWA (campo "ctwaClid" no GHL) — usado no evento de conversão do Meta
 };
 function fieldMap() {
   if (!process.env.ATTRIBUTION_FIELD_MAP) return DEFAULT_MAP;
