@@ -96,23 +96,25 @@ export async function createOrMoveOpportunityQualified(contact, { funnel, score,
 }
 
 // Ao AGENDAR (Tina marcou reunião/pré-atendimento), FECHA a opp do Pré-Vendas (SDR)
-// como WON — o SDR concluiu e o lead vai pro pipeline de Vendas (Reuniões Agendadas,
-// criado pelo workflow do GHL). Sem isso a opp fica ABERTA e uma automação de
-// reentrada do GHL a captura ~2h depois → vira card duplicado (caso Cláudia). Só toca
-// o pipeline da Tina, NUNCA o de Vendas/outro time. Env CLOSE_SDR_OPP_ON_BOOKING=false
-// desliga. Fail-open. Não fecha won/lost já fechadas.
+// como PERDIDO/DECLINADO — o time NÃO quer "Ganho" (SDR não fecha venda; o lead vai
+// pro pipeline de Vendas → Reuniões Agendadas, criado pelo workflow do GHL). Sem
+// fechar, a opp fica ABERTA e a automação de reentrada do GHL a captura ~2h depois →
+// card duplicado (caso Cláudia). Só toca o pipeline da Tina, NUNCA Vendas/outro time.
+// Status configurável (SCHEDULED_SDR_OPP_STATUS, default 'lost'); desliga com
+// CLOSE_SDR_OPP_ON_BOOKING=false. Fail-open.
 export async function closeSdrOppOnBooking(contact) {
   if (process.env.CLOSE_SDR_OPP_ON_BOOKING === 'false') return;
   const { pipelineId } = resolvePipeline();
   if (!pipelineId || !contact?.ghl_contact_id || String(contact.ghl_contact_id).startsWith('wa-') || !process.env.GHL_API_TOKEN) return;
+  const closeStatus = process.env.SCHEDULED_SDR_OPP_STATUS || 'lost'; // time pediu declinar, não ganho
   try {
     const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
     const ops = r?.opportunities || (Array.isArray(r) ? r : []);
     for (const o of ops) {
       if (String(o.status || 'open').toLowerCase() !== 'open') continue;
       if (o.pipelineId !== pipelineId) continue;   // só o Pré-Vendas da Tina
-      await GHL.updateOpportunity(o.id, { pipelineId: o.pipelineId, pipelineStageId: o.pipelineStageId, status: 'won' });
-      logger.info({ contactId: contact.id, oppId: o.id }, 'agendou: card Pré-Vendas fechado (won) pra não duplicar');
+      await GHL.updateOpportunity(o.id, { pipelineId: o.pipelineId, pipelineStageId: o.pipelineStageId, status: closeStatus });
+      logger.info({ contactId: contact.id, oppId: o.id, closeStatus }, 'agendou: card Pré-Vendas declinado pra não duplicar');
     }
   } catch (err) {
     logger.warn({ err: err.message, contactId: contact.id }, 'falha fechando card Pré-Vendas no agendamento (segue)');
