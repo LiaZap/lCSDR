@@ -177,16 +177,18 @@ export async function getNextSlots(count = 3, { fromDate = new Date(), spread = 
 }
 
 // Formata um ISO em rótulo humano PT-BR relativo (hoje/amanhã + hora).
+// O "hoje/amanhã" é comparado no fuso de BRASÍLIA, não no do servidor (UTC): à noite
+// no BR já é o dia seguinte em UTC, e o toDateString() do servidor fazia "amanhã 16h"
+// virar "hoje 16h" no aviso do grupo.
 export function labelForSlot(iso) {
   const d = new Date(iso);
   const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
-  const isTomorrow = d.toDateString() === tomorrow.toDateString();
+  const brtDay = x => new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(x);
+  const dDay = brtDay(d), nowDay = brtDay(now), tomDay = brtDay(new Date(now.getTime() + 86_400_000));
 
   const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: TIMEZONE });
-  if (sameDay) return `hoje às ${hora}`;
-  if (isTomorrow) return `amanhã às ${hora}`;
+  if (dDay === nowDay) return `hoje às ${hora}`;
+  if (dDay === tomDay) return `amanhã às ${hora}`;
   const dia = d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', timeZone: TIMEZONE });
   return `${dia} às ${hora}`;
 }
