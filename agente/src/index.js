@@ -106,6 +106,10 @@ app.get('/health', (_, res) => {
         calendars: (process.env.GHL_CALENDAR_IDS || '').split(',').filter(Boolean).length,
         slotMinutes: Number(process.env.GHL_SLOT_MINUTES || 30),
         lookaheadDays: Number(process.env.GHL_SLOT_LOOKAHEAD_DAYS || 5),
+        // Gates de atendimento — pra diagnosticar "Tina atendeu sem a tag/em outro funil".
+        requiredTag: process.env.GHL_TAG_REQUIRED ?? 'tina-liberada',
+        attendExceptReentrada: process.env.ATTEND_EXCEPT_REENTRADA === 'true',
+        ownsEntryLane: process.env.TINA_OWNS_ENTRY_LANE === 'true',
       },
     });
   } catch (err) {
