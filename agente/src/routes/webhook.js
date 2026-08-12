@@ -19,7 +19,7 @@ import {
   upcomingAppointment,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
-import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane, contactOppInReentrada, contactWorkedByOtherTeam, contactExclusivelyInTinaLane, closeSdrOppOnBooking } from '../ghl/opportunities.js';
+import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane, contactOppInReentrada, contactWorkedByOtherTeam, contactExclusivelyInTinaLane, closeSdrOppOnBooking, contactIsConvertedCustomer } from '../ghl/opportunities.js';
 import { liveHandoff } from '../agent/queue.js';
 import { notifyAgendamento, notifyLiveHandoff, notifyIaTinaForaJanela } from '../agent/notify.js';
 import { withContactLock } from '../utils/contactLock.js';
@@ -576,6 +576,14 @@ export async function handleOpportunityStage(event) {
   // oferecendo 10h/14h). Vale pra varredura, recuperação e continuidade.
   if (await upcomingAppointment(contact)) {
     logger.info({ ghlContactId, contactId: contact.id }, 'continuidade IA Tina: lead já tem reunião futura — não re-engaja');
+    return;
+  }
+
+  // CLIENTE CONVERTIDO: mesmo que um workflow mova o card pra IA Tina, a Tina NÃO
+  // reassume quem já é cliente (venda ganha em outro pipeline) — caso Luana, campanha
+  // reativou cliente antigo. A continuação ignora a whitelist, então a guarda vem aqui.
+  if (await contactIsConvertedCustomer(contact)) {
+    logger.info({ ghlContactId, contactId: contact.id }, 'continuidade IA Tina: cliente já convertido — Tina não assume');
     return;
   }
 

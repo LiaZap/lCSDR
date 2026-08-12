@@ -234,6 +234,10 @@ export async function contactOppInReentrada(contact) {
 // reabriu o atendimento + criou card novo). Depois da janela o lead volta a poder
 // ser reengajado (lead antigo é lead novo). LOST_OPP_BLOCK_DAYS=0 desliga.
 const LOST_BLOCK_DAYS = Number(process.env.LOST_OPP_BLOCK_DAYS ?? 30);
+// CLIENTE CONVERTIDO: opp GANHA em pipeline que não é o da Tina (ex.: Vendas Closers)
+// = já é cliente do time de vendas. A Tina não reassume (caso Luana: campanha reativou
+// cliente antigo). SKIP_CONVERTED_CUSTOMERS=false desliga.
+const SKIP_CONVERTED = process.env.SKIP_CONVERTED_CUSTOMERS !== 'false';
 
 export async function contactWorkedByOtherTeam(contact) {
   const { pipelineId } = resolvePipeline();
@@ -250,6 +254,8 @@ export async function contactWorkedByOtherTeam(contact) {
         if (otherPipe) return true;                        // outro time/pipeline
         return false;
       }
+      // Cliente CONVERTIDO em outro pipeline (venda ganha) → não reassume nunca.
+      if (SKIP_CONVERTED && /won/.test(status) && otherPipe) return true;
       // Declinado há pouco em outro pipeline → o time encerrou de propósito, Tina não reabre.
       if (/lost|abandon/.test(status) && otherPipe && LOST_BLOCK_DAYS > 0) {
         const t = new Date(o.updatedAt || o.lastStatusChangeAt || o.dateUpdated || 0).getTime();
@@ -260,6 +266,19 @@ export async function contactWorkedByOtherTeam(contact) {
   } catch {
     return false;
   }
+}
+
+// TRUE se o lead é cliente CONVERTIDO (venda ganha em pipeline != Tina). Usado pra
+// travar a Tina mesmo quando um workflow move o card pra IA Tina (a continuação
+// ignora a whitelist, mas NÃO deve reassumir cliente já vendido — caso Luana).
+export async function contactIsConvertedCustomer(contact) {
+  if (!SKIP_CONVERTED || !contact?.ghl_contact_id || !process.env.GHL_API_TOKEN) return false;
+  const { pipelineId } = resolvePipeline();
+  try {
+    const r = await GHL.getOpportunitiesByContact(contact.ghl_contact_id);
+    const ops = r?.opportunities || (Array.isArray(r) ? r : []);
+    return ops.some(o => /won/.test(String(o.status || '').toLowerCase()) && o.pipelineId && o.pipelineId !== pipelineId);
+  } catch { return false; }
 }
 
 // Reivindica o lead pra Tina (re-engajamento ATIVO): move a opp pra IA Tina (ou
