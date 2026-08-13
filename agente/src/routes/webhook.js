@@ -9,7 +9,7 @@ import {
 } from '../agent/contactService.js';
 import { generateTinaReply } from '../agent/tina.js';
 import { describeImageBuffer } from '../agent/tina-gemini.js';
-import { sendSequence, sendText, preferredChannel } from '../agent/messenger.js';
+import { sendSequence, sendText, preferredChannel, isTinaSentMessage } from '../agent/messenger.js';
 import {
   pauseIA, resumeIA, scheduleFollowup, handleSDRReply,
   markQualifiedAndHandoff, markDisqualified, applyTinaTags,
@@ -311,13 +311,25 @@ async function lastOutboundWasHuman(ghlContactId, localContact) {
     const lastOut = msgs.find(m => (m.direction || '').toLowerCase() === 'outbound');
     if (!lastOut) return false;
 
-    const userId = lastOut.userId || lastOut.user_id || lastOut.sentBy?.id;
-    if (!userId) return false; // sem userId → API → Tina, não humano
+    // === DETECÇÃO POR PROCEDÊNCIA (discriminador primário) ===
+    // O GHL carimba TODA saída (inclusive a da Tina via API) com o userId do DONO
+    // do contato — então userId NÃO distingue Tina de humano. O único sinal
+    // confiável é a procedência: se ESTE messageId foi enviado pela própria Tina
+    // (registrado em tina_sent_msgs no envio), não é humano.
+    const outId = lastOut.id || lastOut.messageId || lastOut._id;
+    if (outId && isTinaSentMessage(outId)) return false;
 
-    // Sanity 1: userId conhecido em sdr_users?
-    // (Se não bate, é provavelmente o PIT da API com algum userId fantasma.)
+    // Automação (workflow/campanha) também não é atendimento humano.
+    if (AUTO_SOURCES.has(String(lastOut.source || '').toLowerCase())) return false;
+
+    const userId = lastOut.userId || lastOut.user_id || lastOut.sentBy?.id;
+
+    // Confirmação secundária (janela de transição): saídas que a Tina mandou ANTES
+    // deste recurso não estão no tina_sent_msgs. Pra não tratar essas como humano,
+    // só conta como humano se o userId for de um SDR conhecido — senão é API/Tina.
+    // (A partir do deploy, o caso comum já é resolvido pela procedência acima.)
     if (!isKnownSdrUserId(userId)) {
-      logger.debug({ userId }, 'userId outbound não bate com nenhum SDR conhecido — assumindo API');
+      logger.debug({ userId }, 'saída sem procedência Tina e userId não é SDR conhecido — assumindo API');
       return false;
     }
 

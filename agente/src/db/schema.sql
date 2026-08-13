@@ -54,6 +54,15 @@ CREATE INDEX IF NOT EXISTS idx_messages_contact ON messages(contact_id, created_
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_ghl_id ON messages(ghl_message_id);
 
+-- Rastreio das mensagens que a PRÓPRIA Tina enviou (messageId devolvido pelo GHL).
+-- Base da DETECÇÃO POR PROCEDÊNCIA: no GHL a saída é carimbada com o userId do DONO
+-- do contato (não dá pra distinguir Tina de humano pelo userId). Então guardamos os
+-- ids que a Tina mandou; uma saída recente que NÃO está aqui e não é workflow = humano.
+CREATE TABLE IF NOT EXISTS tina_sent_msgs (
+  ghl_message_id TEXT PRIMARY KEY,
+  sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS sdr_users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,

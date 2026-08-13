@@ -6,7 +6,24 @@
 
 import { UAZAPI, normalizePhone } from '../uazapi/client.js';
 import { GHL } from '../ghl/client.js';
+import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
+
+// Registra o messageId que a Tina acabou de enviar (procedência). No GHL a saída
+// carimba o userId do DONO do contato — igual ao do humano — então o único jeito
+// confiável de saber "isto foi a Tina" é guardar o id do envio. Idempotente/fail-open.
+export function markTinaSent(res) {
+  const id = res?.messageId || res?.id || res?.message?.id || res?.messages?.[0]?.id;
+  if (id) { try { db.prepare('INSERT OR IGNORE INTO tina_sent_msgs (ghl_message_id) VALUES (?)').run(String(id)); } catch {} }
+  return res;
+}
+
+// TRUE se este messageId do GHL foi enviado pela PRÓPRIA Tina (procedência).
+export function isTinaSentMessage(ghlMessageId) {
+  if (!ghlMessageId) return false;
+  try { return Boolean(db.prepare('SELECT 1 FROM tina_sent_msgs WHERE ghl_message_id = ? LIMIT 1').get(String(ghlMessageId))); }
+  catch { return false; }
+}
 
 export function preferredChannel() {
   // Canal de ATENDIMENTO do lead. Default = GHL/Meta oficial.
@@ -41,11 +58,11 @@ export async function sendText(contact, text, opts = {}) {
     if (!number) throw new Error(`contato sem phone válido: ${contact.id}`);
     return UAZAPI.sendText(number, text);
   }
-  return GHL.sendMessage({
+  return markTinaSent(await GHL.sendMessage({
     contactId: contact.ghl_contact_id,
     message: text,
     type: opts.ghlChannelType || ghlOutboundType(),
-  });
+  }));
 }
 
 /**
@@ -65,11 +82,11 @@ export async function sendMenu(contact, { text, choices, footerText, type = 'but
     return `${i + 1}. ${label.trim()}`;
   });
   const fallbackText = [text, '', ...lines, footerText && `\n_${footerText}_`].filter(Boolean).join('\n');
-  return GHL.sendMessage({
+  return markTinaSent(await GHL.sendMessage({
     contactId: contact.ghl_contact_id,
     message: fallbackText,
     type: ghlOutboundType(),
-  });
+  }));
 }
 
 /**

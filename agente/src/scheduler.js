@@ -2,6 +2,7 @@ import { db } from './db/index.js';
 import { GHL } from './ghl/client.js';
 import { resumeIA } from './agent/handoff.js';
 import { recordOutbound } from './agent/contactService.js';
+import { markTinaSent } from './agent/messenger.js';
 import { sendResumoDiaGroup } from './agent/notify.js';
 import { sweepOrganico } from './agent/organicoSweep.js';
 import { upcomingAppointment } from './agent/scheduling.js';
@@ -56,11 +57,11 @@ async function processFollowups() {
           ? `${saudacao}ainda está por aí? 😊 Pra eu te ajudar a dar o próximo passo com o seu livro, me conta: você está escrevendo, quer publicar ou divulgar um que já lançou?`
           : `${saudacao}dei uma sumida, me desculpa. Você ainda está interessado em saber mais sobre o livro? Se sim, me conta onde você está agora: escrevendo, com livro pronto pra publicar, ou quer divulgar um que já lançou?`;
 
-      await GHL.sendMessage({
+      markTinaSent(await GHL.sendMessage({
         contactId: f.ghl_contact_id,
         message: txt,
         type: process.env.GHL_OUTBOUND_TYPE || 'WhatsApp', // mesmo canal da Tina (SMS/WhatsApp)
-      });
+      }));
       recordOutbound(f.contact_id, { author: 'ia', content: txt });
       db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'followup_sent', ?)`)
         .run(f.contact_id, JSON.stringify({ reason: f.reason }));
