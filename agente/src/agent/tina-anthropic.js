@@ -50,12 +50,16 @@ function estimateTokens(text) {
 }
 
 function buildHistory(contactId, limit = 30) {
+  // As N mensagens MAIS RECENTES, em ordem cronológica. Ver nota em tina-gemini.js:
+  // com `ASC LIMIT 30` a janela congelava nas 30 primeiras e a Tina repetia perguntas.
   let rows = db.prepare(`
-    SELECT direction, author, content, content_type, created_at
-    FROM messages
-    WHERE contact_id = ?
-    ORDER BY created_at ASC, id ASC
-    LIMIT ?
+    SELECT * FROM (
+      SELECT direction, author, content, content_type, created_at, id
+      FROM messages
+      WHERE contact_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    ) ORDER BY created_at ASC, id ASC
   `).all(contactId, limit);
 
   // Cap defensivo: trunca histórico se passar do orçamento de tokens
@@ -78,6 +82,10 @@ function buildHistory(contactId, limit = 30) {
       ...kept,
     ];
   }
+
+  // Janela começa no meio da conversa → pode abrir com fala da Tina, e a API exige
+  // que `messages` comece com 'user'. Descarta as saídas do topo.
+  while (rows.length && rows[0].direction !== 'inbound') rows.shift();
 
   const turns = [];
   for (const m of rows) {

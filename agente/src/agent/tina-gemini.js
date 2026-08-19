@@ -106,12 +106,20 @@ function estimateTokens(text) {
 
 // Histórico no formato Gemini: role 'user' | 'model', parts:[{text}]
 function buildHistory(contactId, limit = 30) {
+  // As N mensagens MAIS RECENTES, devolvidas em ordem cronológica.
+  // ⚠️ ERA `ORDER BY created_at ASC LIMIT 30` = as 30 mais ANTIGAS: passando de 30
+  // mensagens a janela CONGELAVA no começo da conversa e a Tina nunca mais via o
+  // que o lead acabou de dizer — ela lembrava do @ do Instagram do início e pedia
+  // de novo o e-mail/horário que o lead tinha dado 1 minuto antes, em loop. Era a
+  // causa raiz das "mensagens repetidas" (9 relatos da LC entre 02/07 e 11/08).
   let rows = db.prepare(`
-    SELECT direction, author, content, content_type, created_at
-    FROM messages
-    WHERE contact_id = ?
-    ORDER BY created_at ASC, id ASC
-    LIMIT ?
+    SELECT * FROM (
+      SELECT direction, author, content, content_type, created_at, id
+      FROM messages
+      WHERE contact_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    ) ORDER BY created_at ASC, id ASC
   `).all(contactId, limit);
 
   let totalTokens = rows.reduce((s, m) => s + estimateTokens(m.content), 0);
@@ -133,6 +141,11 @@ function buildHistory(contactId, limit = 30) {
       ...kept,
     ];
   }
+
+  // A janela agora começa no meio da conversa, então pode começar com uma fala da
+  // Tina — e o Gemini recusa `contents` que não comece com 'user'. Descarta as
+  // saídas do topo até a primeira mensagem do lead.
+  while (rows.length && rows[0].direction !== 'inbound') rows.shift();
 
   const turns = [];
   for (const m of rows) {
