@@ -211,6 +211,25 @@ REGRAS DE AGENDAMENTO:
 - NUNCA invente um horário que não está nesta lista.`.trim();
 }
 
+// Contexto injetado quando NÃO há NENHUM horário livre em nenhum calendário.
+// ⚠️ Sem este aviso a Tina ficava sem lista nenhuma no contexto e — proibida pelo
+// prompt de dizer que "a agenda não abriu" — INVENTAVA horários plausíveis e dizia
+// "agendei", sem preencher book_slot: nada ia pro calendário e ninguém era avisado.
+// ❌ CASO REAL (Juliete, 20/08): as duas agendas do pré-atendimento estavam zeradas,
+// a Tina ofereceu "11h, 11h30 ou 13h", confirmou "agendei pra hoje às 11h30" e a
+// lead esperou uma ligação que nunca existiu ("aguardei e ninguém me ligou").
+export const NO_SLOTS_CONTEXT = `
+⚠️ AGENDA SEM HORÁRIO DISPONÍVEL (informação do SISTEMA — é fato, confie nela):
+Neste momento NÃO há nenhum horário livre na agenda do time.
+
+- ❌ **NÃO ofereça horário nenhum.** Você não tem horários pra oferecer. Não diga "consigo às 11h", não derive horário do que o lead falou, não chute.
+- ❌ **NÃO diga que agendou, marcou, reservou ou encaixou.** Nada foi marcado — dizer isso faz o lead esperar uma ligação que não vai acontecer.
+- ✅ Diga com naturalidade que vai **confirmar a melhor janela com o time** e que ele retorna com o horário.
+- ✅ Marque \`handoff: true\` e \`stage: "qualificado"\` — o consultor humano assume e fecha o horário.
+
+Exemplo: "Perfeito, [nome]! Vou confirmar a melhor janela com o nosso time e já te retorno com o horário certinho, pode ser? 😊"
+`.trim();
+
 // Registra os horários oferecidos (com o calendário de cada um) pra na hora
 // de marcar saber em qual closer agendar.
 export function recordOffer(contactId, slots) {
@@ -300,22 +319,40 @@ async function slotHasConflict(calendarId, startMs, endMs) {
 // Usado pra ATRIBUIR o contato/reunião ao consultor (regra LC 16/07: sem proprietário
 // a conversa não aparece na caixa de entrada de ninguém — caso Creusa).
 let _calOwners = null;
+let _calDurations = null;
+async function loadCalendarMeta() {
+  if (_calOwners) return;
+  const r = await GHL.listCalendars();
+  _calOwners = {};
+  _calDurations = {};
+  for (const c of (r?.calendars || [])) {
+    const tm = (c.teamMembers || []).find(t => t.isPrimary) || (c.teamMembers || [])[0];
+    if (tm?.userId) _calOwners[c.id] = tm.userId;
+    if (c.slotDuration) _calDurations[c.id] = Number(c.slotDuration);
+  }
+}
 async function calendarOwnerUserId(calendarId) {
   if (!calendarId) return null;
-  if (!_calOwners) {
-    try {
-      const r = await GHL.listCalendars();
-      _calOwners = {};
-      for (const c of (r?.calendars || [])) {
-        const tm = (c.teamMembers || []).find(t => t.isPrimary) || (c.teamMembers || [])[0];
-        if (tm?.userId) _calOwners[c.id] = tm.userId;
-      }
-    } catch (err) {
-      logger.warn({ err: err.message }, 'falha resolvendo donos dos calendários (segue sem atribuir)');
-      return null; // não cacheia a falha — tenta de novo no próximo agendamento
-    }
+  try {
+    await loadCalendarMeta();
+  } catch (err) {
+    logger.warn({ err: err.message }, 'falha resolvendo donos dos calendários (segue sem atribuir)');
+    return null; // não cacheia a falha — tenta de novo no próximo agendamento
   }
   return _calOwners[calendarId] || null;
+}
+
+// Duração da reunião SEGUNDO O CALENDÁRIO, não a global. A roleta mistura agendas
+// com durações diferentes (closers 30min, pré-atendimento 15min) — usar o
+// GHL_SLOT_MINUTES global marcaria reunião de closer com a duração errada.
+// Cai no global só se o calendário não informar.
+async function slotMinutesFor(calendarId) {
+  try {
+    await loadCalendarMeta();
+    return _calDurations?.[calendarId] || SLOT_MINUTES;
+  } catch {
+    return SLOT_MINUTES;
+  }
 }
 
 // Marca o agendamento no GHL, no calendário do closer dono do horário.
@@ -332,11 +369,12 @@ export async function bookSlot(contact, iso, { title, notes, assignedUserId } = 
     logger.warn({ contactId: contact.id, iso }, 'book_slot fora do horário comercial — recusado');
     return { ok: false, error: 'horário fora do expediente' };
   }
-  const end = new Date(start.getTime() + SLOT_MINUTES * 60 * 1000);
-
   // calendário do closer que tinha esse horário (ou o 1º configurado como fallback)
   const calendarId = calendarForSlot(contact.id, iso) || getCalendarIds()[0];
   if (!calendarId) return { ok: false, error: 'sem calendário configurado' };
+
+  // duração PELO CALENDÁRIO (a roleta mistura 30min de closer com 15min de pré-atendimento)
+  const end = new Date(start.getTime() + (await slotMinutesFor(calendarId)) * 60 * 1000);
 
   // TRAVA DE CONFLITO: recusa se o horário já tem reunião (manual, corrida, etc.).
   // ok:false → webhook mantém a Tina agendando e ela oferece outro horário no próximo turno.

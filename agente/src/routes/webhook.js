@@ -16,7 +16,7 @@ import {
 } from '../agent/handoff.js';
 import {
   schedulingEnabled, getNextSlots, slotsContextBlock, bookSlot, recordOffer,
-  upcomingAppointment,
+  upcomingAppointment, NO_SLOTS_CONTEXT,
 } from '../agent/scheduling.js';
 import { bookSearchEnabled, searchBookLink } from '../agent/bookSearch.js';
 import { contactOppOutsideTinaLane, moveLeadToIaTina, claimToIaTina, resolvePipeline, contactInIaTinaLane, contactOppInReentrada, contactWorkedByOtherTeam, contactExclusivelyInTinaLane, closeSdrOppOnBooking, contactIsConvertedCustomer } from '../ghl/opportunities.js';
@@ -1018,8 +1018,12 @@ async function handleInbound(event) {
         extraContext = slotsContextBlock(slots);
         recordOffer(fresh.id, slots);  // guarda qual closer tem cada horário
       } else {
-        // Sem horário disponível: cai no handoff normal (humano confirma)
-        logger.warn({ contactId: fresh.id }, 'agendando mas sem free-slots, handoff normal');
+        // Sem horário disponível: AVISA a Tina explicitamente. Antes ficava só o
+        // logger.warn e ela era chamada SEM lista nenhuma — e, proibida pelo prompt
+        // de dizer que a agenda não abriu, INVENTAVA horário e dizia "agendei"
+        // (caso Juliete 20/08). Agora recebe ordem de não prometer e fazer handoff.
+        extraContext = NO_SLOTS_CONTEXT;
+        logger.warn({ contactId: fresh.id }, 'agendando mas sem free-slots — Tina orientada a NAO prometer horario');
       }
     }
 
