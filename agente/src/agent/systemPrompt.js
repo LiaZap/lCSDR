@@ -44,7 +44,12 @@ const servicosResumo = Object.values(SERVICOS).map(s =>
 // deixa de ser "reunião com especialista" e vira um PRÉ-ATENDIMENTO de 15 min por
 // telefone com o time (Gabriel/Bruna) pra qualificar antes do closer. Env-gated
 // (PREATENDIMENTO_ENABLED=true) — desligado não muda NADA no prompt atual.
-const PRE_ATENDIMENTO_BLOCK = process.env.PREATENDIMENTO_ENABLED === 'true' ? `
+// ⚠️ Com PREATENDIMENTO_CALENDAR_IDS configurado, a modalidade passa a ser POR
+// CALENDÁRIO e vem no contexto de cada horário (scheduling.js/slotModality). Este
+// bloco global é desligado aí — senão ele mandaria chamar TUDO de "pré-atendimento"
+// e brigaria com o texto correto do horário (prometendo ligação pra reunião de closer).
+const PRE_ATENDIMENTO_BLOCK = (process.env.PREATENDIMENTO_ENABLED === 'true'
+  && !(process.env.PREATENDIMENTO_CALENDAR_IDS || '').trim()) ? `
 
 # ⚡ MODO PRÉ-ATENDIMENTO (regra ativa agora — SUBSTITUI o enquadramento de "reunião/especialista")
 O que você agenda ou conecta **NÃO** é a reunião com o especialista — é um **PRÉ-ATENDIMENTO rápido de 15 minutos POR TELEFONE (ligação, não vídeo)** com o nosso time, pra entender melhor o seu projeto **antes** de te conectar com o consultor certo.

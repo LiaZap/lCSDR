@@ -7,14 +7,16 @@
 import { db } from '../db/index.js';
 import { GHL } from '../ghl/client.js';
 import { UAZAPI } from '../uazapi/client.js';
-import { calendarName } from './scheduling.js';
+import { calendarName, slotModality } from './scheduling.js';
 import { logger } from '../utils/logger.js';
 
-// Modo pré-atendimento (teste LC): o aviso do grupo fala "pré-atendimento" em vez
-// de "reunião". Mesmo flag do prompt (PREATENDIMENTO_ENABLED). Desligado = igual antes.
-const AGENDA_LABEL = process.env.PREATENDIMENTO_ENABLED === 'true'
-  ? { titulo: 'Novo pré-atendimento agendado pela Tina', quem: 'Atende' }
-  : { titulo: 'Nova reunião agendada pela Tina', quem: 'Consultor' };
+// Rótulo do aviso conforme a MODALIDADE do calendário em que caiu (a roleta mistura
+// pré-atendimento por telefone com reunião de closer). Sem calendarId — caso do
+// "quer falar agora", que não tem horário marcado — cai no modo global antigo.
+const agendaLabel = (calendarId) => {
+  const m = slotModality(calendarId);
+  return { titulo: m.avisoTitulo, quem: m.avisoQuem };
+};
 
 // Funil em rótulo amigável pro time.
 function funnelLabel(f) {
@@ -73,7 +75,7 @@ export async function notifyLiveHandoff(contact, { consultant, funnel }) {
   const quem = consultant?.name || '(próximo da fila)';
   const msg = `🔥 *Lead quer falar AGORA*\n`
     + `👤 Lead: ${nome}${tel ? ` (${tel})` : ''}\n`
-    + `👨‍💼 ${AGENDA_LABEL.quem}: ${quem}\n`
+    + `👨‍💼 ${agendaLabel().quem}: ${quem}\n`
     + `${resumoLead(contact, funnel)}\n`
     + `\n⚡ Assumir a conversa no WhatsApp o quanto antes.`;
 
@@ -115,9 +117,10 @@ export async function notifyAgendamento(contact, { label, iso, funnel, calendarI
   const nome = contact.name || 'Lead';
   const tel = contact.phone || '';
   const consultor = calendarName(calendarId);
-  const msg = `🗓️ *${AGENDA_LABEL.titulo}*\n`
+  const lbl = agendaLabel(calendarId);
+  const msg = `🗓️ *${lbl.titulo}*\n`
     + `👤 Lead: ${nome}${tel ? ` (${tel})` : ''}\n`
-    + (consultor ? `👨‍💼 ${AGENDA_LABEL.quem}: ${consultor}\n` : '')
+    + (consultor ? `👨‍💼 ${lbl.quem}: ${consultor}\n` : '')
     + `🕐 Quando: ${label}\n`
     + `${resumoLead(contact, funnel)}`;
 

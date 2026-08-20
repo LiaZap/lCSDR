@@ -85,6 +85,27 @@ export function calendarName(calendarId) {
   return CALENDAR_NAMES[calendarId] || null;
 }
 
+// MODALIDADE POR CALENDÁRIO (a roleta mistura dois tipos de compromisso):
+//   - pré-atendimento (Gabriel/Bruna): LIGAÇÃO de 15 min, triagem antes do closer
+//   - closer (Nataly/Victor/Fernanda/Andressa): REUNIÃO de 30 min com o especialista
+// Sem isso a Tina usava um texto único pra todo mundo e prometia "ligação de 15 min"
+// pra quem ia receber reunião de closer — o lead ficava esperando o telefone tocar
+// (❌ caso Juliete, 20/08: "aguardei e ninguém me ligou").
+// Config: PREATENDIMENTO_CALENDAR_IDS="id1,id2" (os que são ligação). Sem ela,
+// cai no PREATENDIMENTO_ENABLED antigo (tudo ligação) ou tudo reunião.
+function preAtendimentoCalendarIds() {
+  return (process.env.PREATENDIMENTO_CALENDAR_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+export function slotModality(calendarId) {
+  const ids = preAtendimentoCalendarIds();
+  const isPre = ids.length
+    ? ids.includes(calendarId)
+    : process.env.PREATENDIMENTO_ENABLED === 'true';   // compat: modo global antigo
+  return isPre
+    ? { tipo: 'ligacao', termo: 'pré-atendimento', desc: 'ligação de 15 min por telefone', tituloAgenda: 'Pré-atendimento LC', avisoTitulo: 'Novo pré-atendimento agendado pela Tina', avisoQuem: 'Atende' }
+    : { tipo: 'reuniao', termo: 'reunião', desc: 'reunião com o especialista', tituloAgenda: 'Reunião LC', avisoTitulo: 'Nova reunião agendada pela Tina', avisoQuem: 'Consultor' };
+}
+
 // Achata a resposta de free-slots do GHL num array de ISO datetimes.
 // GHL devolve { "2026-06-15": { slots: [ "...T14:00:00-03:00", ... ] }, traceId }
 function flattenSlots(raw) {
@@ -196,10 +217,27 @@ export function labelForSlot(iso) {
 // Bloco de contexto injetado no prompt quando há slots disponíveis.
 export function slotsContextBlock(slots) {
   if (!slots || !slots.length) return null;
-  const linhas = slots.map((s, i) => `  ${i + 1}. ${s.label}  (ISO: ${s.iso})`).join('\n');
+  const linhas = slots.map((s, i) => {
+    const m = slotModality(s.calendarId);
+    return `  ${i + 1}. ${s.label} — ${m.desc}  (ISO: ${s.iso})`;
+  }).join('\n');
+
+  // Se a lista mistura ligação e reunião, a Tina PRECISA usar o texto certo pra
+  // cada horário — senão promete ligação pra quem vai receber reunião de closer.
+  const tipos = new Set(slots.map(s => slotModality(s.calendarId).tipo));
+  const regraModalidade = tipos.size > 1
+    ? `
+⚠️ **ATENÇÃO, os horários acima são de DOIS tipos diferentes.** Cada linha diz qual é o dela:
+- **"ligação de 15 min por telefone"** → é um **pré-atendimento**: nossa equipe LIGA para o lead. Use a palavra "pré-atendimento", diga que é rápido (15 min) e **por telefone**.
+- **"reunião com o especialista"** → é uma **reunião**. Use a palavra "reunião", NÃO prometa ligação telefônica.
+🚫 **NUNCA troque um pelo outro.** Se você oferecer/confirmar o horário de uma reunião dizendo que "vamos te ligar", o lead fica esperando uma ligação que não vai acontecer. Use SEMPRE a descrição da linha que você escolheu.`
+    : `
+Todos os horários acima são: **${slotModality(slots[0].calendarId).desc}**. Use esse enquadramento ao oferecer e ao confirmar.`;
+
   return `
-HORÁRIOS DISPONÍVEIS PARA AGENDAMENTO (entre os closers, próximos dias):
+HORÁRIOS DISPONÍVEIS PARA AGENDAMENTO (próximos dias):
 ${linhas}
+${regraModalidade}
 
 REGRAS DE AGENDAMENTO:
 - Ofereça proativamente os **2-3 mais cedo** desta lista (priorize o quanto antes, o lead não pode esfriar).
@@ -393,7 +431,9 @@ export async function bookSlot(contact, iso, { title, notes, assignedUserId } = 
       contactId: contact.ghl_contact_id,
       startTime: start.toISOString(),
       endTime: end.toISOString(),
-      title: title || `${process.env.GHL_APPOINTMENT_TITLE || 'Reunião LC'}, ${contact.name || 'lead'}`,
+      // título conforme a MODALIDADE do calendário (pré-atendimento x reunião),
+      // pra agenda do consultor bater com o que a Tina prometeu pro lead
+      title: title || `${process.env.GHL_APPOINTMENT_TITLE || slotModality(calendarId).tituloAgenda}, ${contact.name || 'lead'}`,
       notes: notes || `Agendado pela Tina (SDR). Funil: ${contact.funnel || '-'}.`,
       ...(ownerId ? { assignedUserId: ownerId } : {}),
     });
