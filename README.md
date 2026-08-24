@@ -1,6 +1,8 @@
-# LC SDR — Lila
+# LC SDR — Tina
 
-Agente SDR humanizado pra Grupo LC (Agência de Comunicação + LC Books Editora). Lila qualifica leads via WhatsApp (uazapi), passa qualificados pro Closer humano, e roda dashboard de revisão pra LC.
+Agente SDR humanizado pra Grupo LC (Agência de Comunicação + LC Books Editora). **Tina** qualifica leads via WhatsApp (uazapi), passa qualificados pro Closer humano, e roda dashboard de revisão pra LC.
+
+> **Nome do agente: Tina.** O agente já se chamou *Lila*; o código foi renomeado e `src/agent/tina.js` e `TINA_SYSTEM_PROMPT` são os nomes válidos. Os aliases `generateLilaReply` e `LILA_SYSTEM_PROMPT` existem só por compatibilidade da transição, e os arquivos em `docs/source-material/` mantêm o nome antigo por serem material histórico de treinamento.
 
 **Stack**: Node.js + Express · OpenAI Responses API (gpt-4.1-mini) · React + Vite + nginx · SQLite · uazapi (WhatsApp) · GoHighLevel (CRM) · Docker
 
@@ -8,7 +10,7 @@ Agente SDR humanizado pra Grupo LC (Agência de Comunicação + LC Books Editora
 
 ```
 agente/         backend Node + Express + OpenAI/Anthropic + SQLite
-  src/agent/    Lila: prompt, knowledge base, dispatcher de canal
+  src/agent/    Tina: prompt, knowledge base, dispatcher de canal
   src/uazapi/   cliente WhatsApp via uazapi
   src/ghl/      cliente GoHighLevel (CRM, custom fields, opportunities)
   src/routes/   webhook + auth + dashboard API + playground
@@ -17,7 +19,7 @@ agente/         backend Node + Express + OpenAI/Anthropic + SQLite
 dashboard/      React + Vite. Em prod: build estática servida por nginx
   src/pages/    Login · Overview · Conversations · Leads · LeadDetail · Playground
 
-docs/           Setup, deploy, prompt da Lila, material-fonte (treinamento)
+docs/           Setup, deploy, prompt da Tina, material-fonte (treinamento)
 ```
 
 ## Setup local (dev)
@@ -45,7 +47,7 @@ Resumo: 2 serviços (`agente` privado + `dashboard` público com nginx fazendo p
 ## Comandos úteis
 
 ```bash
-# Testes da Lila
+# Testes da Tina
 docker compose exec agente npm run test:suite           # 23 cenários + avaliação
 docker compose exec agente npm run test:suite --runs=3  # multi-run
 
@@ -65,7 +67,7 @@ docker compose exec agente npm run seed:demo
 - [docs/DEPLOY-EASYPANEL.md](docs/DEPLOY-EASYPANEL.md) — deploy passo a passo
 - [docs/UAZAPI-SETUP.md](docs/UAZAPI-SETUP.md) — integração WhatsApp
 - [docs/GHL-SETUP.md](docs/GHL-SETUP.md) — integração GoHighLevel
-- [docs/AGENT-PROMPT.md](docs/AGENT-PROMPT.md) — prompt da Lila explicado
+- [docs/AGENT-PROMPT.md](docs/AGENT-PROMPT.md) — prompt da Tina explicado
 - [docs/FASES.md](docs/FASES.md) — roadmap por fases
 - [docs/source-material/](docs/source-material/) — material oficial entregue pelo cliente
 
@@ -78,7 +80,7 @@ docker compose exec agente npm run seed:demo
 
 ## Status atual
 
-- ✅ Lila conversa via OpenAI Responses (JSON Schema strict)
+- ✅ Tina conversa via OpenAI Responses (JSON Schema strict)
 - ✅ Suite de testes 23 cenários, 100% em multi-run
 - ✅ Dashboard com login, métricas, conversas, playground
 - ✅ Botões interativos via uazapi (testado envio)

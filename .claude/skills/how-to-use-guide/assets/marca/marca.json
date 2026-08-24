@@ -1,0 +1,10 @@
+{
+  "key": "grupo-lc",
+  "label": "Grupo LC",
+  "tokens": {
+    "marca": "#B91C1C",
+    "marca-texto": "#7F1D1D"
+  },
+  "logo": { "tipo": "svg" },
+  "avisos": []
+}
