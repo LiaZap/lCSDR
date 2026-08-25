@@ -241,6 +241,27 @@ async function declineOppAndAppointment(contact) {
   }
 }
 
+// ENCERRA lead que nunca respondeu, depois de todos os follow-ups (regra LC 25/08).
+// ❌ CASO REAL (Eurivan, 14/07): a Tina mandou a apresentação, o lead nunca respondeu
+// e o card ficou ABERTO na coluna "IA Tina" desde julho. Somados, viraram ~600 cards
+// abertos que ninguém está atendendo — o time perdia a visão de quem a Tina realmente
+// toca e teria que fechar um a um na mão.
+// NÃO manda mensagem nenhuma: só fecha o card e para de tocar o lead.
+export async function closeLeadNoResponse(contact) {
+  db.prepare(`
+    UPDATE contacts SET stage = 'desqualificado', ai_paused = 1,
+      qualification_notes = COALESCE(NULLIF(qualification_notes,''), 'encerrado sem resposta do lead'),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(contact.id);
+  await declineOppAndAppointment(contact);
+  try {
+    db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'encerrado_sem_resposta', ?)`)
+      .run(contact.id, JSON.stringify({ ghlContactId: contact.ghl_contact_id }));
+  } catch {}
+  logger.info({ contactId: contact.id }, 'lead encerrado sem resposta — card declinado');
+}
+
 export async function markDisqualified(contact, result) {
   db.prepare(`
     UPDATE contacts
@@ -254,6 +275,13 @@ export async function markDisqualified(contact, result) {
 
   // Declina card + cancela reunião em paralelo (não bloqueia a resposta ao lead)
   declineOppAndAppointment(contact).catch(() => {});
+
+  // Log auditável do encerramento — alimenta o "Encerrados" do resumo diário
+  // (pedido do Gabriel 25/08: saber quantos a Tina declinou no dia).
+  try {
+    db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'lead_desqualificado', ?)`)
+      .run(contact.id, JSON.stringify({ motivo: result?.qualification_notes || null }));
+  } catch {}
 
   // Etiquetas (temperatura frio, etc) são aplicadas pelo applyTinaTags()
   // que o webhook chama a cada turno. Aqui só os custom fields.

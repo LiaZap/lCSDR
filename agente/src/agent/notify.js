@@ -166,12 +166,22 @@ export function buildResumoDiaText() {
     WHERE m.direction='inbound' AND c.ghl_contact_id NOT LIKE 'playground-%' AND date(m.created_at,'-3 hours')=date('now','-3 hours')
   `).get()?.c || 0;
 
+  // Encerrados no dia (pedido do Gabriel, 25/08: "seria legal um relatório de
+  // quantos ela declinou no dia"). Soma os dois caminhos de encerramento: negativa
+  // do lead (desqualificado) e silêncio total depois dos follow-ups.
+  const encerrados = db.prepare(`
+    SELECT COUNT(DISTINCT contact_id) c FROM events_log
+    WHERE kind IN ('encerrado_sem_resposta','lead_desqualificado')
+      AND date(created_at,'-3 hours')=date('now','-3 hours')
+  `).get()?.c || 0;
+
   const linhas = [
     `📊 *Resumo da Tina — ${data}*`,
     ``,
     `🤖 Atendidos: *${atendeu}* ${atendeu === 1 ? 'lead' : 'leads'}`,
     `🗓️ Agendados: *${agendou}* ${agendou === 1 ? 'reunião' : 'reuniões'}`,
     `👤 Equipe assumiu: *${timeAssumiu}* ${timeAssumiu === 1 ? 'lead' : 'leads'}`,
+    `🔒 Encerrados: *${encerrados}* ${encerrados === 1 ? 'atendimento' : 'atendimentos'}`,
   ];
 
   // Reuniões de hoje por consultor (rodízio) — só se houver.

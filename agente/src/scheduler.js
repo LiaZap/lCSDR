@@ -1,6 +1,6 @@
 import { db } from './db/index.js';
 import { GHL } from './ghl/client.js';
-import { resumeIA } from './agent/handoff.js';
+import { resumeIA, closeLeadNoResponse } from './agent/handoff.js';
 import { recordOutbound } from './agent/contactService.js';
 import { markTinaSent } from './agent/messenger.js';
 import { sendResumoDiaGroup } from './agent/notify.js';
@@ -11,12 +11,17 @@ import { logger } from './utils/logger.js';
 
 const TICK_MS = 60_000; // 1 min
 
+// Horas de silêncio APÓS o último follow-up até ENCERRAR o card do lead (regra LC
+// 25/08: sem isso o atendimento morto fica aberto pra sempre na coluna da Tina —
+// ~600 cards acumulados). 0 desliga o encerramento automático.
+const CLOSE_HOURS = Number(process.env.FOLLOWUP_CLOSE_HOURS ?? 48);
+
 // Processa follow-ups vencidos: lead/SDR em silêncio → IA retoma com mensagem leve.
 // IMPORTANTE: processa só 1 follow-up por contato por tick. Mesmo que o banco
 // tenha 5 follow-ups acumulados, manda só 1 mensagem e marca todos como sent.
 async function processFollowups() {
   const due = db.prepare(`
-    SELECT f.*, c.id as contact_id, c.ghl_contact_id, c.name, c.ai_paused, c.stage
+    SELECT f.*, c.id as contact_id, c.ghl_contact_id, c.name, c.ai_paused, c.stage, c.last_inbound_at
     FROM followups f
     JOIN contacts c ON c.id = f.contact_id
     WHERE f.sent = 0 AND f.due_at <= datetime('now')
@@ -49,13 +54,34 @@ async function processFollowups() {
       // vê) → não cutuca ("você ainda tem interesse?" pra quem já marcou é ruim).
       if (await upcomingAppointment({ id: f.contact_id, ghl_contact_id: f.ghl_contact_id })) continue;
 
+      // ENCERRAMENTO SEM RESPOSTA: não manda mensagem nenhuma, só FECHA o card do
+      // lead que nunca respondeu (regra LC 25/08). Fica DEPOIS de todos os gates
+      // acima de propósito: se o lead virou agendado/qualificado, se um humano
+      // assumiu (ai_paused) ou se já existe reunião futura, NÃO encerra — encerrar
+      // aqui cancelaria uma reunião real (declineOppAndAppointment tira da agenda).
+      if (f.reason === 'encerrar_sem_resposta') {
+        // respondeu depois do último follow-up? então está vivo, não encerra.
+        const enviadoEm = new Date(f.due_at).getTime() - CLOSE_HOURS * 3600_000;
+        if (f.last_inbound_at && new Date(f.last_inbound_at).getTime() > enviadoEm) {
+          logger.info({ contactId: f.contact_id }, 'lead respondeu depois do follow-up — nao encerra');
+          continue;
+        }
+        await closeLeadNoResponse({ id: f.contact_id, ghl_contact_id: f.ghl_contact_id }).catch(err =>
+          logger.warn({ err: err.message, contactId: f.contact_id }, 'falha encerrando lead sem resposta'));
+        continue;
+      }
+
       const nome = (f.name || '').split(' ')[0];
       const saudacao = nome ? `Oi ${nome}, ` : 'Oi, ';
+      // Textos reescritos (queixa do Gabriel, 25/08): o follow-up antigo abria com
+      // "dei uma sumida, me desculpa" — a Tina se acusava de sumir, o lead não
+      // entendia do que se tratava e respondia "?" ou "não entendi". Agora ela se
+      // identifica, lembra o CONTEXTO (o livro dele) e faz UMA pergunta simples.
       const txt = f.reason === 'silencio_sdr'
-        ? `${saudacao}passando pra te dar um retorno. O time já foi notificado, mas pra não te deixar no vácuo: me conta rapidinho o que você está precisando? Assim agilizo aqui.`
+        ? `${saudacao}passando pra te dar um retorno. O time já foi avisado, mas pra não te deixar sem resposta: me conta rapidinho o que você precisa? Assim eu agilizo por aqui 😊`
         : f.reason === 'silencio_lead_24h'
-          ? `${saudacao}ainda está por aí? 😊 Pra eu te ajudar a dar o próximo passo com o seu livro, me conta: você está escrevendo, quer publicar ou divulgar um que já lançou?`
-          : `${saudacao}dei uma sumida, me desculpa. Você ainda está interessado em saber mais sobre o livro? Se sim, me conta onde você está agora: escrevendo, com livro pronto pra publicar, ou quer divulgar um que já lançou?`;
+          ? `${saudacao}aqui é a Tina, do Grupo LC 😊 Só pra não deixar passar: ainda posso te ajudar com o seu livro? Se fizer sentido, me diz em que fase você está — escrevendo, pronto pra publicar, ou já lançado e quer divulgar.`
+          : `${saudacao}aqui é a Tina, do Grupo LC 😊 Nossa conversa sobre o seu livro ficou parada por aqui. Você ainda tem interesse em seguir? Me conta em que fase está: escrevendo, pronto pra publicar, ou já lançado e quer divulgar.`;
 
       markTinaSent(await GHL.sendMessage({
         contactId: f.ghl_contact_id,
@@ -73,6 +99,14 @@ async function processFollowups() {
       if (f.reason === 'silencio_lead') {
         db.prepare(`INSERT INTO followups (contact_id, due_at, reason) VALUES (?, ?, 'silencio_lead_24h')`)
           .run(f.contact_id, new Date(Date.now() + 24 * 3600_000).toISOString());
+      }
+
+      // Depois do ÚLTIMO toque: se o lead continuar em silêncio, agenda o
+      // ENCERRAMENTO do card (regra LC 25/08 — senão o atendimento morto fica
+      // aberto pra sempre na coluna da Tina). Horas em FOLLOWUP_CLOSE_HOURS.
+      if (f.reason === 'silencio_lead_24h' && CLOSE_HOURS > 0) {
+        db.prepare(`INSERT INTO followups (contact_id, due_at, reason) VALUES (?, ?, 'encerrar_sem_resposta')`)
+          .run(f.contact_id, new Date(Date.now() + CLOSE_HOURS * 3600_000).toISOString());
       }
     } catch (err) {
       logger.error({ err: err.message, followupId: f.id }, 'falha em follow-up');
