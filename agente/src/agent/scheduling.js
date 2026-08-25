@@ -101,9 +101,12 @@ export function slotModality(calendarId) {
   const isPre = ids.length
     ? ids.includes(calendarId)
     : process.env.PREATENDIMENTO_ENABLED === 'true';   // compat: modo global antigo
+  // tituloAgenda + sep formam o título do compromisso: `${tituloAgenda}${sep}${nome}`.
+  // Closer usa "Reunião LC Agência x Fulano" (pedido da LC, e é o mesmo formato que
+  // os calendários dos closers já usam nativamente); pré-atendimento segue com vírgula.
   return isPre
-    ? { tipo: 'ligacao', termo: 'pré-atendimento', desc: 'ligação de 15 min por telefone', tituloAgenda: 'Pré-atendimento LC', avisoTitulo: 'Novo pré-atendimento agendado pela Tina', avisoQuem: 'Atende' }
-    : { tipo: 'reuniao', termo: 'reunião', desc: 'reunião com o especialista', tituloAgenda: 'Reunião LC', avisoTitulo: 'Nova reunião agendada pela Tina', avisoQuem: 'Consultor' };
+    ? { tipo: 'ligacao', termo: 'pré-atendimento', desc: 'ligação de 15 min por telefone', tituloAgenda: 'Pré-atendimento LC', sep: ', ', avisoTitulo: 'Novo pré-atendimento agendado pela Tina', avisoQuem: 'Atende' }
+    : { tipo: 'reuniao', termo: 'reunião', desc: 'reunião com o especialista', tituloAgenda: 'Reunião LC Agência', sep: ' x ', avisoTitulo: 'Nova reunião agendada pela Tina', avisoQuem: 'Consultor' };
 }
 
 // Achata a resposta de free-slots do GHL num array de ISO datetimes.
@@ -433,7 +436,9 @@ export async function bookSlot(contact, iso, { title, notes, assignedUserId } = 
       endTime: end.toISOString(),
       // título conforme a MODALIDADE do calendário (pré-atendimento x reunião),
       // pra agenda do consultor bater com o que a Tina prometeu pro lead
-      title: title || `${process.env.GHL_APPOINTMENT_TITLE || slotModality(calendarId).tituloAgenda}, ${contact.name || 'lead'}`,
+      title: title || (process.env.GHL_APPOINTMENT_TITLE
+        ? `${process.env.GHL_APPOINTMENT_TITLE}, ${contact.name || 'lead'}`
+        : `${slotModality(calendarId).tituloAgenda}${slotModality(calendarId).sep}${contact.name || 'lead'}`),
       notes: notes || `Agendado pela Tina (SDR). Funil: ${contact.funnel || '-'}.`,
       ...(ownerId ? { assignedUserId: ownerId } : {}),
     });

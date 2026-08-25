@@ -1010,7 +1010,15 @@ async function handleInbound(event) {
     // horários livres mais próximos do calendário do GHL e injeta no contexto
     // pra Tina oferecer. Mais cedo possível, pra não esfriar o lead.
     let extraContext = null;
-    if (schedulingEnabled() && fresh.stage === 'agendando') {
+    // ⚠️ TURNO CEGO (causa raiz dos casos Juliete 20/08 e Silvia 23/08): o stage só
+    // vira 'agendando' NO FIM deste handler (linha ~1193), depois da resposta já ter
+    // saído. Ou seja, no turno em que o lead PEDE pra agendar ("prefiro agendar,
+    // amanhã 11h30 pode ser?") a Tina ainda respondia SEM lista de horários — e sem
+    // lista não existe nem a regra que a proíbe de inventar. Resultado: ela aceitava
+    // o horário que o lead propôs, dizia "confirmei", não preenchia book_slot, e nada
+    // era criado na agenda nem avisado no grupo. Por isso 'qualificado' entra aqui:
+    // é o stage em que o lead está quando responde "quero agendar".
+    if (schedulingEnabled() && ['agendando', 'qualificado'].includes(fresh.stage)) {
       // leque de horários (manhã/tarde, próximos dias) pra atender pedidos
       // específicos do lead sem inventar. A Tina oferece os mais cedo por padrão.
       const slots = await getNextSlots(8, { spread: true });
