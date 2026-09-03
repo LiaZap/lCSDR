@@ -100,6 +100,14 @@ app.get('/health', (_, res) => {
         conflictCheck: process.env.SCHEDULING_CONFLICT_CHECK !== 'false',
         organicoSweep: process.env.ORGANICO_SWEEP_ENABLED === 'true',
         preAtendimento: process.env.PREATENDIMENTO_ENABLED === 'true',
+        // Quantos calendários são PRÉ-ATENDIMENTO (ligação 15min). Com 0 aqui e
+        // preAtendimento=true, o modo global assume e TODO agendamento vira
+        // "Pré-atendimento LC" — inclusive os de closer (queixa do Gabriel 02/09).
+        preAtendimentoCals: (process.env.PREATENDIMENTO_CALENDAR_IDS || '').split(',').map(s => s.trim()).filter(Boolean).length,
+        // Se setada, SOBRESCREVE o título por calendário (fica igual pra todo mundo).
+        appointmentTitleFixo: process.env.GHL_APPOINTMENT_TITLE || null,
+        followup: process.env.FOLLOWUP_ENABLED === 'true',
+        followupCloseHours: Number(process.env.FOLLOWUP_CLOSE_HOURS ?? 48),
         // tags de origem que a Tina NÃO atende (nomes, não são segredo) — permite
         // conferir em produção se o bloqueio (ex.: form de Arquitetos) está ativo.
         blockTags: (process.env.GHL_TAG_BLOCK || '').split(',').map(s => s.trim()).filter(Boolean),
@@ -108,7 +116,9 @@ app.get('/health', (_, res) => {
         lookaheadDays: Number(process.env.GHL_SLOT_LOOKAHEAD_DAYS || 5),
         // Gates de atendimento — pra diagnosticar "Tina atendeu sem a tag/em outro funil".
         requiredTag: process.env.GHL_TAG_REQUIRED ?? 'tina-liberada',
-        attendExceptReentrada: process.env.ATTEND_EXCEPT_REENTRADA === 'true',
+        // ⚠️ o webhook lê TINA_ATTEND_EXCEPT_REENTRADA (com prefixo). Sem o prefixo
+        // aqui, o /health reportava sempre false mesmo com o modo ligado.
+        attendExceptReentrada: process.env.TINA_ATTEND_EXCEPT_REENTRADA === 'true',
         ownsEntryLane: process.env.TINA_OWNS_ENTRY_LANE === 'true',
       },
     });
