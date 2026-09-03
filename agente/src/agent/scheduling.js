@@ -24,6 +24,11 @@ import { logger } from '../utils/logger.js';
 
 const SLOT_MINUTES = Number(process.env.GHL_SLOT_MINUTES || 30);
 const LOOKAHEAD_DAYS = Number(process.env.GHL_SLOT_LOOKAHEAD_DAYS || 5);
+// Distância MÁXIMA (em dias) do horário que o consultor da vez pode oferecer. Se o
+// mais cedo dele passar disso, o rodízio pula pro próximo — mesmo que esse próximo
+// já tenha recebido lead (regra LC 03/09: lead atendido rápido > distribuição igual).
+// 0 desliga a regra (volta ao rodízio puro).
+const MAX_AHEAD_DAYS = Number(process.env.SCHEDULING_MAX_AHEAD_DAYS ?? 3);
 const TIMEZONE = process.env.GHL_TIMEZONE || 'America/Sao_Paulo';
 
 // TRAVA DE CONFLITO: antes de agendar, confere se o horário JÁ tem reunião no
@@ -188,16 +193,40 @@ export async function getNextSlots(count = 3, { fromDate = new Date(), spread = 
 
   // RODÍZIO: começa pelo consultor da vez, oferece os horários DELE.
   // Pula quem não tiver horário, na ordem da roleta.
+  //
+  // ⚠️ REGRA LC 03/09: pula TAMBÉM quem só tem horário LONGE (> MAX_AHEAD_DAYS),
+  // passando pro próximo mesmo que ele já tenha recebido lead. Antes o rodízio só
+  // olhava "tem horário?" — então o lead caía num consultor com agenda travada e
+  // recebia reunião pra semana que vem, mesmo com outro closer livre AMANHÃ.
+  // ❌ CASO REAL: Nataly só abria em 07/09 e Victor em 09/09 enquanto Andressa
+  // tinha 6 horários no dia seguinte; a Tina oferecia 07/09 e o lead esfriava.
+  // Se NINGUÉM estiver dentro do limite, cai no fallback e oferece o mais cedo que
+  // existir — o lead nunca fica sem opção. MAX_AHEAD_DAYS=0 desliga a regra.
+  const limiteMs = MAX_AHEAD_DAYS > 0 ? MAX_AHEAD_DAYS * 86_400_000 : Infinity;
+  const maisCedoDe = cid => new Date(byCal.get(cid)[0].iso).getTime() - startMs;
+
   const start = rotationStart(calendarIds.length);
   for (let i = 0; i < calendarIds.length; i++) {
     const cid = calendarIds[(start + i) % calendarIds.length];
     const slots = byCal.get(cid);
-    if (slots && slots.length) {
-      const picked = spread ? spreadPick(slots, count) : slots.slice(0, count);
-      return picked.map(pack);
+    if (!slots?.length) continue;                       // sem horário → próximo
+    if (maisCedoDe(cid) > limiteMs) {                   // só tem horário longe → próximo
+      logger.debug({ calendarId: cid, dias: Math.floor(maisCedoDe(cid) / 86_400_000) }, 'consultor da vez só tem horário distante — passa pro próximo');
+      continue;
     }
+    const picked = spread ? spreadPick(slots, count) : slots.slice(0, count);
+    return picked.map(pack);
   }
-  return [];
+
+  // FALLBACK: ninguém dentro do limite (todos com agenda travada) → oferece o
+  // horário MAIS CEDO que existir, seja de quem for. Melhor uma reunião distante
+  // do que nenhuma.
+  const comSlots = [...byCal.keys()].filter(c => byCal.get(c)?.length);
+  if (!comSlots.length) return [];
+  const maisCedo = comSlots.sort((a, b) => maisCedoDe(a) - maisCedoDe(b))[0];
+  logger.info({ calendarId: maisCedo, dias: Math.floor(maisCedoDe(maisCedo) / 86_400_000) }, 'nenhum consultor com horário próximo — oferecendo o mais cedo disponível');
+  const slots = byCal.get(maisCedo);
+  return (spread ? spreadPick(slots, count) : slots.slice(0, count)).map(pack);
 }
 
 // Formata um ISO em rótulo humano PT-BR relativo (hoje/amanhã + hora).

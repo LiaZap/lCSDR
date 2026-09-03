@@ -114,6 +114,9 @@ app.get('/health', (_, res) => {
         calendars: (process.env.GHL_CALENDAR_IDS || '').split(',').filter(Boolean).length,
         slotMinutes: Number(process.env.GHL_SLOT_MINUTES || 30),
         lookaheadDays: Number(process.env.GHL_SLOT_LOOKAHEAD_DAYS || 5),
+        // Distância máx. (dias) que o consultor da vez pode oferecer antes do
+        // rodízio pular pro próximo. 0 = rodízio puro (sem pular por distância).
+        maxAheadDays: Number(process.env.SCHEDULING_MAX_AHEAD_DAYS ?? 3),
         // Gates de atendimento — pra diagnosticar "Tina atendeu sem a tag/em outro funil".
         requiredTag: process.env.GHL_TAG_REQUIRED ?? 'tina-liberada',
         // ⚠️ o webhook lê TINA_ATTEND_EXCEPT_REENTRADA (com prefixo). Sem o prefixo
