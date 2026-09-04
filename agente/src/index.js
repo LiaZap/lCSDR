@@ -108,6 +108,10 @@ app.get('/health', (_, res) => {
         appointmentTitleFixo: process.env.GHL_APPOINTMENT_TITLE || null,
         followup: process.env.FOLLOWUP_ENABLED === 'true',
         followupCloseHours: Number(process.env.FOLLOWUP_CLOSE_HOURS ?? 48),
+        // A partir de quantos dias de intervalo o histórico ganha aviso de "outro
+        // momento da conversa" (invariante #3). Serve também de marcador de build:
+        // se este campo aparece, o deploy pegou as correções de 04/09.
+        historyGapDays: Number(process.env.LLM_HISTORY_GAP_DAYS ?? 2),
         // tags de origem que a Tina NÃO atende (nomes, não são segredo) — permite
         // conferir em produção se o bloqueio (ex.: form de Arquitetos) está ativo.
         blockTags: (process.env.GHL_TAG_BLOCK || '').split(',').map(s => s.trim()).filter(Boolean),
