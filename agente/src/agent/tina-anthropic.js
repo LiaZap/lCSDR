@@ -3,6 +3,7 @@ import { TINA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
 import { SERVICOS, resolveServiceKey } from './knowledge.js';
 import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
+import { marcasDeTempo } from '../utils/historyTime.js';
 
 const VALID_SERVICES = new Set(Object.keys(SERVICOS));
 const PROVIDER = 'anthropic';
@@ -87,13 +88,17 @@ function buildHistory(contactId, limit = 30) {
   // que `messages` comece com 'user'. Descarta as saídas do topo.
   while (rows.length && rows[0].direction !== 'inbound') rows.shift();
 
+  const marcas = marcasDeTempo(rows);   // avisa saltos de tempo (invariante #3)
   const turns = [];
-  for (const m of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const m = rows[i];
     const role = m.direction === 'inbound' ? 'user' : 'assistant';
     let text = m.content || '';
     if (m.content_type === 'audio_transcript') text = `[áudio transcrito] ${text}`;
     if (m.content_type === 'pdf_blocked') text = `[o lead mandou um PDF — você respondeu que análise é etapa de leitura crítica]`;
     if (m.author === 'sdr') text = `[SDR humano respondeu] ${text}`;
+    const marca = marcas.get(i);
+    if (marca) text = `${marca}\n${text}`;
     turns.push({ role, content: text });
   }
   return turns;

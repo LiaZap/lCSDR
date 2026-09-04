@@ -15,6 +15,7 @@ import { TINA_SYSTEM_PROMPT, PROMPT_VERSION } from './systemPrompt.js';
 import { SERVICOS, resolveServiceKey } from './knowledge.js';
 import { db } from '../db/index.js';
 import { logger } from '../utils/logger.js';
+import { marcasDeTempo } from '../utils/historyTime.js';
 
 const VALID_SERVICES = new Set(Object.keys(SERVICOS));
 const PROVIDER = 'openai';
@@ -206,12 +207,15 @@ function buildHistory(contactId, limit = 30) {
   // Janela começa no meio da conversa → não deixa abrir com fala da Tina.
   while (rows.length && rows[0].direction !== 'inbound') rows.shift();
 
-  return rows.map(m => {
+  const marcas = marcasDeTempo(rows);   // avisa saltos de tempo (invariante #3)
+  return rows.map((m, i) => {
     const role = m.direction === 'inbound' ? 'user' : 'assistant';
     let text = m.content || '';
     if (m.content_type === 'audio_transcript') text = `[áudio transcrito] ${text}`;
     if (m.content_type === 'pdf_blocked') text = '[lead mandou PDF — você respondeu que análise é etapa de leitura crítica]';
     if (m.author === 'sdr') text = `[SDR humano respondeu] ${text}`;
+    const marca = marcas.get(i);
+    if (marca) text = `${marca}\n${text}`;
     return { role, content: text };
   });
 }

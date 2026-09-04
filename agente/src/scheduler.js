@@ -6,6 +6,7 @@ import { markTinaSent } from './agent/messenger.js';
 import { sendResumoDiaGroup } from './agent/notify.js';
 import { sweepOrganico } from './agent/organicoSweep.js';
 import { upcomingAppointment } from './agent/scheduling.js';
+import { contactWorkedByOtherTeam } from './ghl/opportunities.js';
 import { handleOpportunityStage } from './routes/webhook.js';
 import { logger } from './utils/logger.js';
 
@@ -53,6 +54,17 @@ async function processFollowups() {
       // Lead JÁ TEM reunião futura no GHL (marcada por humano — o stage local não
       // vê) → não cutuca ("você ainda tem interesse?" pra quem já marcou é ruim).
       if (await upcomingAppointment({ id: f.contact_id, ghl_contact_id: f.ghl_contact_id })) continue;
+
+      // OUTRO TIME: o follow-up não tinha NENHUMA guarda de dono — só olhava stage,
+      // ai_paused e reunião futura. Uma vez agendada a linha, ela disparava mesmo com
+      // o lead já na coluna de um closer humano. ❌ CASO REAL (Rodrigo, 27/08): o lead
+      // estava no pipeline dos Closers e recebeu da Tina "nossa conversa ficou parada
+      // por aqui" como PRIMEIRA mensagem — sendo que ele tinha acabado de preencher o
+      // formulário dizendo que já publicou e quer divulgar.
+      if (await contactWorkedByOtherTeam({ id: f.contact_id, ghl_contact_id: f.ghl_contact_id })) {
+        logger.info({ contactId: f.contact_id }, 'follow-up cancelado: lead está com outro time');
+        continue;
+      }
 
       // ENCERRAMENTO SEM RESPOSTA: não manda mensagem nenhuma, só FECHA o card do
       // lead que nunca respondeu (regra LC 25/08). Fica DEPOIS de todos os gates

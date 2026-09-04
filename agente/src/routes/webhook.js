@@ -1128,7 +1128,28 @@ async function handleInbound(event) {
     }
 
     // 8) Envia resposta(s)
-    await sendSequence(fresh, items);
+    // ⚠️ TURNO MUDO: estas duas guardas existiam SÓ no caminho de continuidade
+    // (linhas ~653-667). No fluxo principal o retorno do sendSequence era ignorado,
+    // então uma bolha vazia — ou um envio que falhou — deixava o lead em silêncio
+    // absoluto E gravava outbound fantasma (o sistema achava que tinha respondido).
+    // ❌ CASO REAL (02/09): a Tina simplesmente não respondeu o lead que perguntava
+    // de novo sobre a reunião, e nada alertou o time.
+    const temTexto = items.some(i => (typeof i === 'string' ? i : i?.text || '').trim());
+    if (!temTexto) {
+      logger.warn({ contactId: fresh.id }, 'TURNO MUDO: LLM não gerou texto — nada a enviar, avisando time');
+      try { db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'turno_mudo', ?)`).run(fresh.id, JSON.stringify({ motivo: 'sem_texto' })); } catch {}
+      await notifyIaTinaForaJanela(fresh).catch(() => {});
+      return;
+    }
+    const sent = await sendSequence(fresh, items);
+    if (!sent) {
+      // Nada saiu de verdade (falha de canal). NÃO grava outbound fantasma: senão o
+      // card fica "atendido" e o lead, mudo — e o follow-up nem dispara direito.
+      logger.warn({ contactId: fresh.id }, 'TURNO MUDO: nenhuma mensagem enviada (falha de envio), avisando time');
+      try { db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'turno_mudo', ?)`).run(fresh.id, JSON.stringify({ motivo: 'falha_envio' })); } catch {}
+      await notifyIaTinaForaJanela(fresh).catch(() => {});
+      return;
+    }
     for (const item of items) {
       const txt = typeof item === 'string' ? item : (item?.text || '');
       if (txt) recordOutbound(fresh.id, { author: 'ia', content: txt, usage: result.usage });
@@ -1194,9 +1215,20 @@ async function handleInbound(event) {
       db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'handoff_aluno', ?)`)
         .run(fresh.id, JSON.stringify({ to: 'cursos@lcagencia.com.br' }));
 
-    } else if (result.funnel === 'publicar' && (result.handoff || result.stage === 'qualificado') && !result.handoff_mode && !result.book_slot) {
+    } else if (result.funnel === 'publicar' && result.end_conversation && (result.handoff || result.stage === 'qualificado') && !result.handoff_mode && !result.book_slot) {
       // PUBLICAÇÃO: orçamento vai pro e-mail editorial@, não pro agendamento.
       // Encerra a parte da Tina (handoff por e-mail), pausa pra não ficar dialogando.
+      //
+      // ⚠️ EXIGE end_conversation (regra LC 04/09). Sem ele, esta branch capturava o
+      // turno em que a Tina ACABOU de perguntar "falar agora ou agendar?" — porque
+      // nesse turno handoff_mode é null POR DEFINIÇÃO (o lead ainda não respondeu) e
+      // o prompt manda marcar handoff:true junto com a pergunta. Ela se auto-pausava
+      // no meio da própria pergunta e nunca mais respondia; o reclaim também não
+      // salvava, porque o card já tinha sido movido pra fora da raia dela.
+      // ❌ CASO REAL (Ailton, 20/08): perguntou "prefere falar agora ou agendar?",
+      // se desligou, e as duas respostas do lead morreram sem resposta.
+      // Sem end_conversation, cai na branch de "qualificou mas não escolheu ainda",
+      // que mantém a IA ATIVA pra receber a escolha no próximo turno.
       db.prepare(`
         UPDATE contacts SET ai_paused = 1, ai_paused_at = CURRENT_TIMESTAMP,
           stage = 'handoff', updated_at = CURRENT_TIMESTAMP
