@@ -278,7 +278,8 @@ REGRAS DE AGENDAMENTO:
 - ⚠️ SÓ devolva "book_slot" quando o lead confirmar **DIA E HORA específicos** (ex: "pode ser amanhã às 11h30", ou um "sim" claro a um horário que VOCÊ ofereceu com dia+hora). Use o ISO EXATO daquele horário (copie da lista).
 - ⚠️ Se o lead deu só a HORA ("11:30 dá certo") mas NÃO o dia — ou só o dia sem a hora — **NÃO marque ainda**: confirme o que falta ("11h30 de qual dia fica melhor pra você, hoje ou amanhã?") e só devolva book_slot depois que ele responder com dia+hora.
 - ⚠️ NUNCA trate como confirmação mensagens ambíguas tipo "ok", "recebido", "confirmado o recebimento", "blz", "deixa eu ver", "vou verificar". Isso NÃO é "pode marcar". Pergunte de forma direta: "Posso confirmar então [dia] às [hora]?" e só marque com o "sim" explícito.
-- NUNCA invente um horário que não está nesta lista.`.trim();
+- NUNCA invente um horário que não está nesta lista.
+- 🗓️ **FALE O HORÁRIO COM O RÓTULO EXATO DA LISTA.** Se a linha diz "quarta-feira, 09/09 às 10:30", diga **"quarta-feira, 09/09 às 10:30"**. **NUNCA traduza por conta própria para "hoje" ou "amanhã"** — só use "hoje"/"amanhã" se for exatamente o que está escrito na linha. ❌ ERRO REAL: a lista dizia "quarta-feira, 09/09" e a Tina falou "amanhã, quarta-feira" — o lead esperou a reunião no dia seguinte e ela estava marcada 8 dias depois.`.trim();
 }
 
 // Contexto injetado quando NÃO há NENHUM horário livre em nenhum calendário.

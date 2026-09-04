@@ -78,10 +78,24 @@ async function ghl(method, path, body, { retries = 3 } = {}) {
   throw lastErr;
 }
 
-// === Download autenticado (attachments) ===
-// GHL serve anexos em URLs que exigem o mesmo Bearer token.
+// === Download de attachments ===
+// ⚠️ SEM Authorization, de propósito. O comentário antigo dizia o contrário e estava
+// ERRADO: o anexo NÃO é servido pela API autenticada, e sim por um object store
+// público (static-assets.internal.usercontent.site). Esse host devolve 401
+// AuthenticationRequired quando recebe QUALQUER header Authorization, e 200 quando
+// não recebe nenhum. Com o header, todo download falhava → o webhook caía no catch e
+// a Tina respondia "[áudio recebido — não consegui ouvir]" / "[lead enviou uma
+// imagem]" sem nunca chamar o Whisper nem a visão. Era a queixa "não está ouvindo
+// áudios e lendo imagens" (LC 03/09) — o Whisper e o Gemini vision estavam certos,
+// só nunca eram alcançados. Passava batido em teste manual porque o CDN ignora o
+// header na chave de cache: arquivo já baixado antes responde 200 mesmo com auth.
+// Em produção a Tina baixa segundos depois do lead mandar — cache frio, sempre 401.
+// Fallback: se algum dia um anexo exigir auth, tenta de novo COM o header.
 export async function downloadAttachment(url) {
-  const res = await fetch(url, { headers: { Authorization: authHeader() } });
+  let res = await fetch(url);
+  if (res.status === 401 || res.status === 403) {
+    res = await fetch(url, { headers: { Authorization: authHeader() } });
+  }
   if (!res.ok) throw new Error(`GHL attachment ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }

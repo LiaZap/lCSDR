@@ -138,9 +138,16 @@ export async function generateTinaReply({ contact, incomingText, extraContext = 
   // Entra aqui (entrada única) pra valer pros 3 providers; NÃO vai no system prompt
   // pra não estourar o cache (prompt estático = cache hit).
   try {
+    // ⚠️ A DATA (dia/mês/ano) É OBRIGATÓRIA aqui. Antes só ia o dia da semana e a
+    // hora ("terça-feira, 19:14"), então o modelo não tinha como medir a distância
+    // até um horário da lista: via "hoje é terça" + um slot rotulado "quarta-feira,
+    // 09/09" e concluía que era amanhã. ❌ CASO REAL (01/09): disse ao lead que o
+    // horário mais próximo era "amanhã, quarta-feira, às 10h30" e marcou 09/09 —
+    // 8 dias depois. O agendamento fez o certo; ela FALOU errado.
     const agora = new Intl.DateTimeFormat('pt-BR', {
       timeZone: process.env.GHL_TIMEZONE || 'America/Sao_Paulo',
-      weekday: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
     }).format(new Date());
     const horaCtx = `AGORA em Brasília: ${agora}. Horário de atendimento do time humano: 9h às 18h, seg-sex.`;
     extraContext = extraContext ? `${horaCtx}\n\n${extraContext}` : horaCtx;

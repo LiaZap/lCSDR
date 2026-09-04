@@ -1103,6 +1103,30 @@ async function handleInbound(event) {
       }
     }
 
+    // 7.5) TRAVA DE DATA: o texto da Tina TEM que bater com o dia que foi marcado.
+    // O prompt sozinho não segura — ❌ CASO REAL (01/09): a lista dizia "quarta-feira,
+    // 09/09 às 10:30" e ela escreveu "amanhã, quarta-feira, às 10h30"; o lead esperou
+    // no dia seguinte e a reunião estava 8 dias depois. O código já tem a data certa
+    // (booked.label) na mão, só não usava. Se a reunião NÃO é hoje/amanhã e o texto
+    // diz "hoje"/"amanhã", troca a última bolha por uma confirmação com a data real.
+    // ⚠️ o padrão NÃO pode terminar em \b: em JS o "ã" não é caractere de palavra, então
+    // /amanhã\b/ NUNCA casa com "amanhã as 10h". Usa lookahead de letra, e aceita a
+    // forma sem acento ("amanha"), que o modelo escreve na prática.
+    const REL = /(?:^|[^a-zA-ZÀ-ÿ])(hoje|amanh[ãa])(?![a-zA-ZÀ-ÿ])/i;
+    if (booked?.ok && booked.label && !/^(hoje|amanh[ãa])(?![a-zA-ZÀ-ÿ])/i.test(booked.label)) {
+      const idx = items.map(x => (typeof x === 'string' ? x : x?.text || '')).findLastIndex(t => REL.test(t));
+      if (idx >= 0) {
+        const primeiro = (fresh.name || '').trim().split(/\s+/)[0];
+        const certo = `Fechado${primeiro ? ', ' + primeiro : ''}! Agendei para **${booked.label}** e já reservei esse horário só pra você. Você vai receber a confirmação no seu e-mail. Até lá! 😊`;
+        logger.warn({ contactId: fresh.id, label: booked.label, textoErrado: String(items[idx]).slice(0, 120) }, 'Tina falou hoje/amanhã mas a reunião é outro dia — texto corrigido pelo sistema');
+        items[idx] = certo;
+        try {
+          db.prepare(`INSERT INTO events_log (contact_id, kind, payload) VALUES (?, 'data_corrigida', ?)`)
+            .run(fresh.id, JSON.stringify({ label: booked.label }));
+        } catch {}
+      }
+    }
+
     // 8) Envia resposta(s)
     await sendSequence(fresh, items);
     for (const item of items) {
